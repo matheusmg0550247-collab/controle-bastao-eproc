@@ -25,7 +25,7 @@ APP_URL_CLOUD = 'https://controle-bastao-cesupe.streamlit.app'
 # 🆕 LISTA DE CONSULTORES (AJUSTADA)
 CONSULTORES = [
     "Alex", "Dirceu", "Douglas", "Hugo", "Igor", "Jerry", 
-    "João", "Jonatas", "Leandro", "Luiz", "Marcelo", "👧🏻 Marina A.", 
+    "João", "Jonatas", "Leandro", "Luiz", "Marcelo", "👧🏻 Marina M.", 
     "👧🏼 Marina A.", "Vanessa", "Gleis"
 ]
 
