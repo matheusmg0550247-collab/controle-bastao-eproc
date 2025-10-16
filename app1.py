@@ -8,7 +8,8 @@ from datetime import datetime, timedelta
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
 
-# --- 2. Definição das Variáveis Globais (CORRIGIDAS) ---
+# --- 2. Definição das Variáveis Globais ---
+# ATENÇÃO: NGROK_AUTH_TOKEN e LOG/EXECUÇÃO SÃO REMOVIDOS.
 
 # 🛑 WEBHOOK DE RELATÓRIO DIÁRIO (MANTIDO)
 GOOGLE_CHAT_WEBHOOK_RELATORIO = "https://chat.googleapis.com/v1/spaces/AAQA0V8TAhs/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Zl7KMv0PLrm5c7IMZZdaclfYoc-je9ilDDAlDfqDMAU"
@@ -18,16 +19,15 @@ CHAT_WEBHOOK_BASTAO = "https://chat.googleapis.com/v1/spaces/AAQA5CyNolU/message
 
 BASTAO_EMOJI = "🌸"
 
-# ⬅️ URL PERMANENTE DO SEU APP (CORRIGIDA - SEM U+00A0)
+# ⬅️ URL PERMANENTE DO SEU APP (CORRIGIDO)
 APP_URL_CLOUD = 'https://controle-bastao-cesupe.streamlit.app'
 
-# 🆕 LISTA DE CONSULTORES (AJUSTADA PARA EVITAR DUPLICIDADE NA INTERFACE)
+# 🆕 LISTA DE CONSULTORES (AJUSTADA)
 CONSULTORES = [
     "Alex", "Dirceu N.", "Douglas", "Hugo", "Igor", "Jerry", 
     "João", "Jonatas", "Leandro", "Luiz", "Marcelo", "Marina S.", 
     "Marina T.", "Vanessa", "Gleis"
 ]
-# *Usei Dirceu N. e Marina S./Marina T. para diferenciar os nomes iguais na lista original.
 
 # --- 4. CÓDIGO DO APP STREAMLIT (app.py) ---
 def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, public_url):
@@ -44,7 +44,7 @@ def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, pub
         "",
         f"BASTAO_EMOJI = '{emoji}'",
         f"CONSULTORES = {consultores}",
-        f"WEBHOOK_RELATORIO = '{webhook_relatorio}'", 
+        f"WEBHOOK_RELATORIO = '{webhook_relatorio}'", # CORRIGIDO: Removido U+00A0
         f"WEBHOOK_BASTAO = '{webhook_bastao}'",
         f"APP_URL = '{public_url}'",
         "TIMER_RERUN_S = 30",
