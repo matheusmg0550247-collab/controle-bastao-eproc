@@ -105,7 +105,7 @@ def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, pub
         "",
         "def send_chat_notification_internal(consultor, status):",
         "    if WEBHOOK_BASTAO and status == 'Bastão':",
-        '        message_template = "🎉 **BASTÃO GIRADO!** 🎉 \\n\\n- **Novo Responsável:** {consultor}\\n- **Acesse o Painel:** {app_url}" ',
+        '        message_template = "🎉 **BASTÃO GIRADO!** 🎉 \\n\\n- **Novo Responsável:** {consultor}\\n- **Acesse o Painel:** https://controle-bastao-legados.streamlit.app/" ',
         '        message_text = message_template.format(consultor=consultor, app_url=APP_URL)',
         '        chat_message = {"text": message_text}',
         '        try:',
