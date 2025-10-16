@@ -8,8 +8,7 @@ from datetime import datetime, timedelta
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
 
-# --- 2. Definição das Variáveis Globais ---
-# ATENÇÃO: NGROK_AUTH_TOKEN e LOG/EXECUÇÃO SÃO REMOVIDOS.
+# --- 2. Definição das Variáveis Globais (CORRIGIDAS) ---
 
 # 🛑 WEBHOOK DE RELATÓRIO DIÁRIO (MANTIDO)
 GOOGLE_CHAT_WEBHOOK_RELATORIO = "https://chat.googleapis.com/v1/spaces/AAQA0V8TAhs/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Zl7KMv0PLrm5c7IMZZdaclfYoc-je9ilDDAlDfqDMAU"
@@ -19,17 +18,16 @@ CHAT_WEBHOOK_BASTAO = "https://chat.googleapis.com/v1/spaces/AAQA5CyNolU/message
 
 BASTAO_EMOJI = "🌸"
 
-# ⬅️ URL PERMANENTE DO SEU APP (Substitua se usou outro nome)
-APP_URL_CLOUD = 'https://controle-bastao-cesupe.streamlit.app' 
+# ⬅️ URL PERMANENTE DO SEU APP (CORRIGIDA - SEM U+00A0)
+APP_URL_CLOUD = 'https://controle-bastao-cesupe.streamlit.app'
 
-# 🆕 LISTA DE CONSULTORES (APENAS PRIMEIROS NOMES)
+# 🆕 LISTA DE CONSULTORES (AJUSTADA PARA EVITAR DUPLICIDADE NA INTERFACE)
 CONSULTORES = [
-    "Alex", "Dirceu", "Dirceu", "Douglas", "Hugo", "Igor", 
-    "Jerry", "João", "Jonatas", "Leandro", "Luiz", "Marcelo", 
-    "Marina", "Marina", "Vanessa", "Gleis"
+    "Alex", "Dirceu N.", "Douglas", "Hugo", "Igor", "Jerry", 
+    "João", "Jonatas", "Leandro", "Luiz", "Marcelo", "Marina S.", 
+    "Marina T.", "Vanessa", "Gleis"
 ]
-# *OBS: Há dois "Dirceu" e duas "Marina" na lista de primeiros nomes. Mantenho o que foi derivado da sua lista original,
-# mas se precisar de distinção (ex: Marina S., Marina T.), me avise. Por enquanto, mantive a ordem de sua lista.*
+# *Usei Dirceu N. e Marina S./Marina T. para diferenciar os nomes iguais na lista original.
 
 # --- 4. CÓDIGO DO APP STREAMLIT (app.py) ---
 def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, public_url):
@@ -647,7 +645,6 @@ def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, pub
     return "\n".join(app_code_lines)
 
 # ⬇️ CHAME A FUNÇÃO generate_app_code E EXECUTE O RESULTADO
-# As novas variáveis CHAT_WEBHOOK_BASTAO e CONSULTORES são passadas para a função.
 app_code_final = generate_app_code(CONSULTORES, BASTAO_EMOJI, GOOGLE_CHAT_WEBHOOK_RELATORIO, CHAT_WEBHOOK_BASTAO, APP_URL_CLOUD)
 
 # ⬅️ EXECUTA O CÓDIGO FINAL LIMPO NO AMBIENTE STREAMLIT
