@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
 
-# --- 2. Definição das Variáveis Globais ---
+# --- 2. Definição das Variáveis Globais (Python de Execução) ---
 # Estes webhooks foram mantidos conforme o código original
 GOOGLE_CHAT_WEBHOOK_RELATORIO = "https://chat.googleapis.com/v1/spaces/AAQA0V8TAhs/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Zl7KMv0PLrm5c7IMZZdaclfYoc-je9ilDDAlDfqDMAU"
 CHAT_WEBHOOK_BASTAO = "https://chat.googleapis.com/v1/spaces/AAQAXbwpQHY/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=7AQaoGHiWIfv3eczQzVZ-fbQdBpSBOh1CyQ854o1f7k"
@@ -19,12 +19,18 @@ APP_URL_CLOUD = 'https://controle-bastao-cesupe.streamlit.app'
 
 CONSULTORES = [
     "Barbara", "Bruno", "Claudia", "Douglas", "Fábio", "Glayce", "Isac",
-    "Isabela", "Ivana", "Leonardo", "Morôni", "Michael", "Pablo", "Ranyer",
+    "Isabela", "Ivana", "Leonardo",  "Michael", "Morôni", "Pablo", "Ranyer",
     "Victoria"
 ]
 
+# --- Variáveis de Som (Definidas AQUI para injeção correta) ---
+# Usaremos essas variáveis para INJETAR os valores no código gerado.
+SOUND_URL = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3" # Arquivo de 10 segundos, mas será interrompido
+STOP_TIME_MS = 5000 # Parar após 5 segundos
+
 # --- 4. CÓDIGO DO APP STREAMLIT (app.py) ---
-def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, public_url):
+def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, public_url, sound_url, stop_time_ms):
+    # As variáveis sound_url e stop_time_ms estão agora como argumentos da função
     app_code_lines = [
         "import streamlit as st",
         "import pandas as pd",
@@ -51,10 +57,9 @@ def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, pub
         "STATUSES_DE_SAIDA = ['Atividade', 'Almoço', 'Saída Temporária']",
         "GIF_URL = 'https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExY2pjMDN0NGlvdXp1aHZ1ejJqMnY5MG1yZmN0d3NqcDl1bTU1dDJrciZlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/fXnRObM8Q0RkOmR5nf/giphy.gif'",
         "",
-        "# --- Variáveis de Som (Corrigido o NameError) ---",
-        "# URL de exemplo para som curto (será interrompido em 5 segundos pelo JS)",
-        'SOUND_URL = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3"',
-        "STOP_TIME_MS = 5000 # 5 segundos",
+        "# --- Variáveis de Som (Injetadas) ---",
+        f"SOUND_URL = '{sound_url}'",
+        f"STOP_TIME_MS = {stop_time_ms}",
         "",
         "# --- Funções de Persistência de Estado ---",
         "",
@@ -126,23 +131,20 @@ def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, pub
         "    return False",
         "",
         "def play_sound_html():",
-        '    # Acessa as variáveis globais definidas acima',
-        '    # Link de exemplo de um sino/alerta curto (Apenas para demonstração)',
-        '    # O JavaScript garante que a reprodução dure no máximo 5 segundos.',
-        '    ',
+        "    # Usa as constantes SOUND_URL e STOP_TIME_MS, que agora estão definidas no escopo do código gerado.",
         '    return f"""',
         '<audio id="bastao_alert_audio" autoplay="true">',
-        f'    <source src="{SOUND_URL}" type="audio/mp3">',
+        '    <source src="{SOUND_URL}" type="audio/mp3">',
         '</audio>',
         '<script>',
         '    var audio = document.getElementById("bastao_alert_audio");',
         '    // Tenta reproduzir (necessário para alguns navegadores)',
         '    audio.play().catch(e => console.log("Audio playback blocked:", e));',
         '    // Define um tempo limite para pausar o áudio após 5 segundos',
-        f'    setTimeout(function() {{',
+        '    setTimeout(function() {',
         '        audio.pause();',
         '        audio.currentTime = 0; // Volta ao início',
-        f'    }}, {STOP_TIME_MS});',
+        '    }, {STOP_TIME_MS});',
         '</script>',
         '"""',
         "",
@@ -668,7 +670,16 @@ def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, pub
     return "\n".join(app_code_lines)
 
 # ⬇️ CHAME A FUNÇÃO generate_app_code E EXECUTE O RESULTADO
-app_code_final = generate_app_code(CONSULTORES, BASTAO_EMOJI, GOOGLE_CHAT_WEBHOOK_RELATORIO, CHAT_WEBHOOK_BASTAO, APP_URL_CLOUD)
+# CORRIGIDO: Passando as variáveis de som como argumentos.
+app_code_final = generate_app_code(
+    CONSULTORES, 
+    BASTAO_EMOJI, 
+    GOOGLE_CHAT_WEBHOOK_RELATORIO, 
+    CHAT_WEBHOOK_BASTAO, 
+    APP_URL_CLOUD,
+    SOUND_URL,
+    STOP_TIME_MS
+)
 
 # ⬅️ EXECUTA O CÓDIGO FINAL LIMPO NO AMBIENTE STREAMLIT
 exec(app_code_final)
