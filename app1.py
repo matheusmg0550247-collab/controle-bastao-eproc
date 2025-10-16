@@ -19,18 +19,16 @@ APP_URL_CLOUD = 'https://controle-bastao-cesupe.streamlit.app'
 
 CONSULTORES = [
     "Barbara", "Bruno", "Claudia", "Douglas", "Fábio", "Glayce", "Isac",
-    "Isabela", "Ivana", "Leonardo",  "Michael", "Morôni", "Pablo", "Ranyer",
+    "Isabela", "Ivana", "Leonardo", "Morôni", "Michael", "Pablo", "Ranyer",
     "Victoria"
 ]
 
 # --- Variáveis de Som (Definidas AQUI para injeção correta) ---
-# Usaremos essas variáveis para INJETAR os valores no código gerado.
-SOUND_URL = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3" # Arquivo de 10 segundos, mas será interrompido
-STOP_TIME_MS = 5000 # Parar após 5 segundos
+SOUND_URL = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3"
+STOP_TIME_MS = 5000 
 
 # --- 4. CÓDIGO DO APP STREAMLIT (app.py) ---
 def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, public_url, sound_url, stop_time_ms):
-    # As variáveis sound_url e stop_time_ms estão agora como argumentos da função
     app_code_lines = [
         "import streamlit as st",
         "import pandas as pd",
@@ -101,6 +99,10 @@ def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, pub
         "            for consultor, time_str in data['current_status_starts'].items():",
         "                data['current_status_starts'][consultor] = datetime.fromisoformat(time_str)",
         "            ",
+            "            # Garante que a chave 'play_sound' exista, mesmo que não estivesse no JSON antigo",
+            "            data['play_sound'] = data.get('play_sound', False)",
+            "            data['gif_warning'] = data.get('gif_warning', False)",
+        "            ",
         "            return data",
         "        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:",
         "            print(f'Erro ao carregar estado: {e}. Iniciando estado padrão.')",
@@ -131,20 +133,20 @@ def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, pub
         "    return False",
         "",
         "def play_sound_html():",
-        "    # Usa as constantes SOUND_URL e STOP_TIME_MS, que agora estão definidas no escopo do código gerado.",
+        "    # Corrigido: As chaves do JavaScript foram duplicadas ({{ e }}) para evitar SyntaxError no f-string Python externo.",
         '    return f"""',
         '<audio id="bastao_alert_audio" autoplay="true">',
-        '    <source src="{SOUND_URL}" type="audio/mp3">',
+        '    <source src="{{SOUND_URL}}" type="audio/mp3">',
         '</audio>',
         '<script>',
         '    var audio = document.getElementById("bastao_alert_audio");',
         '    // Tenta reproduzir (necessário para alguns navegadores)',
         '    audio.play().catch(e => console.log("Audio playback blocked:", e));',
         '    // Define um tempo limite para pausar o áudio após 5 segundos',
-        '    setTimeout(function() {',
+        '    setTimeout(function() {{',
         '        audio.pause();',
         '        audio.currentTime = 0; // Volta ao início',
-        '    }, {STOP_TIME_MS});',
+        '    }}, {{STOP_TIME_MS}});',
         '</script>',
         '"""',
         "",
@@ -670,7 +672,7 @@ def generate_app_code(consultores, emoji, webhook_relatorio, webhook_bastao, pub
     return "\n".join(app_code_lines)
 
 # ⬇️ CHAME A FUNÇÃO generate_app_code E EXECUTE O RESULTADO
-# CORRIGIDO: Passando as variáveis de som como argumentos.
+# Passando as variáveis de som como argumentos.
 app_code_final = generate_app_code(
     CONSULTORES, 
     BASTAO_EMOJI, 
