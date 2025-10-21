@@ -16,13 +16,12 @@ GOOGLE_CHAT_WEBHOOK_BACKUP = "https://chat.googleapis.com/v1/spaces/AAQA0V8TAhs/
 CHAT_WEBHOOK_BASTAO = "https://chat.googleapis.com/v1/spaces/AAQA5CyNolU/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Zolqmc0YfJ5bPzsqLrefwn8yBbNQLLfFBzLTwIkr7W4"
 # --- ⬆️ FIM DA MUDANÇA ---
 BASTAO_EMOJI = "🌸"
-APP_URL_CLOUD = 'https://controle-bastao-legados.streamlit.app'
+APP_URL_CLOUD = 'Acesse o site do bastão'
 CONSULTORES = sorted([
-    
     "Alex Paulo da Silva",
     "Dirceu Gonçalves Siqueira Neto",
     "Douglas de Souza Gonçalves",
-    "Farley Leandro de Oliveira Juliano", # Note: Verify if "Juliano" is part of the name or separate
+    "Farley Leandro de Oliveira Juliano", 
     "Gleis da Silva Rodrigues",
     "Hugo Leonardo Murta",
     "Igor Dayrell Gonçalves Correa",
