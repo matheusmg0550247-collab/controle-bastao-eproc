@@ -1,3 +1,13 @@
+# ============================================
+# 0. INSTALAÇÃO E CONFIGURAÇÃO (EXECUTE PRIMEIRO)
+# ============================================
+print("Instalando/Atualizando bibliotecas...")
+# ESTE COMANDO DEVE SER EXECUTADO NO AMBIENTE SHELL (COLAB)
+!pip install streamlit pyngrok pandas requests -qq
+
+# ============================================
+# 1. IMPORTS E DEFINIÇÕES GLOBAIS
+# ============================================
 import streamlit as st
 import pandas as pd
 import subprocess
@@ -10,23 +20,22 @@ import requests
 from datetime import datetime, timedelta 
 from operator import itemgetter
 
-# --- 1. Instalação e Configuração ---
-
-print("Instalando bibliotecas...")
-!pip install streamlit pyngrok pandas requests -qq
-
-# --- 2. Definição das Variáveis Globais ---
+# --- Constantes ---
 # TOKEN NGROK INSERIDO
 NGROK_AUTH_TOKEN = "33qWVVUBttRjIByEhBsD0I9Z830_2vJSytCoeDRX4FpYHQX3q" 
-# NOVO WEBHOOK PARA O RELATÓRIO DIÁRIO (ENVIADO APENAS PELO SCHEDULER)
-GOOGLE_CHAT_WEBHOOK_URL = "https://chat.googleapis.com/v1/spaces/AAQA5CyNolU/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Zolqmc0YfJ5bPzsqLrefwn8yBbNQLLfFBzLTwIkr7W4" 
+# WEBHOOK PARA NOTIFICAÇÃO DE TROCA DE BASTÃO
+CHAT_WEBHOOK_BASTAO = "https://chat.googleapis.com/v1/spaces/AAQA5CyNolU/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Zolqmc0YfJ5bPzsqLrefwn8yBbNQLLfFBzLTwIkr7W4"
 BASTAO_EMOJI = "🌸" 
+APP_URL_CLOUD = 'https://controle-bastao-cesupe.streamlit.app' # URL de exemplo para notificação
 
 CONSULTORES = [
     "Barbara", "Bruno", "Claudia", "Douglas", "Fábio", "Glayce", "Isac", 
     "Isabela", "Ivana", "Leonardo", "Morôni", "Michael", "Pablo", "Ranyer", 
     "Rhuan", "Victoria"
 ]
+LOG_FILE = 'status_log.json'
+STATUS_SAIDA_PRIORIDADE = ['Saída Temporária']
+STATUSES_DE_SAIDA = ['Atividade', 'Almoço', 'Saída Temporária']
 
 # --- 3. Configuração do ngrok ---
 try:
@@ -39,7 +48,7 @@ except Exception as e:
 
 # --- 4. CÓDIGO DO APP STREAMLIT (app.py) ---
 
-def generate_app_code(consultores, emoji, webhook_url):
+def generate_app_code(consultores, emoji, webhook_url_bastao):
     app_code_lines = [
         "import streamlit as st",
         "import pandas as pd",
@@ -51,34 +60,27 @@ def generate_app_code(consultores, emoji, webhook_url):
         "",
         f"BASTAO_EMOJI = '{emoji}'",
         f"CONSULTORES = {consultores}",
-        f"WEBHOOK_URL = '{webhook_url}'",
+        f"CHAT_WEBHOOK_BASTAO = '{webhook_url_bastao}'",
         "TIMER_RERUN_S = 10",
         "LOG_FILE = 'status_log.json'",
-        "YOUTUBE_ID = 'yW0D5iK0i_A'",
-        "START_TIME_S = 10",
-        "PLAYBACK_TIME_MS = 10000",
+        "APP_URL_CLOUD = 'https://controle-bastao-cesupe.streamlit.app'",
         "STATUS_SAIDA_PRIORIDADE = ['Saída Temporária']",
         "STATUSES_DE_SAIDA = ['Atividade', 'Almoço', 'Saída Temporária']",
         "",
         "# --- Funções de Log e Ajuda ---",
         "",
-        "def send_chat_notification_internal(consultor, status):",
-        "    if WEBHOOK_URL and WEBHOOK_URL != 'SUA_URL_DO_WEBHOOK_DO_CHAT_AQUI':",
-        '        message_text = "📢 **MUDANÇA DE BASTÃO CESUPE** \\n\\n- **Consultor:** {{consultor}}\\n- **Novo Status:** {{status}}\\n\\n*Acesse o Streamlit para mais detalhes.*"',
-        '        chat_message = {{"text": message_text.format(consultor=consultor, status=status)}}',
-        '        try:',
-        '            requests.post(WEBHOOK_URL, json=chat_message)',
-        '            return True',
-        '        except requests.exceptions.RequestException:',
-        '            return False',
-        '    return False',
-        "",
-        "def play_sound_html():",
-        '    return """',
-        '<audio autoplay="true">',
-        '    <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mp3">',
-        '</audio>',
-        '"""',
+        # FUNÇÃO DE NOTIFICAÇÃO ATUALIZADA
+        "def send_chat_notification_troca(consultor):",
+        "    if CHAT_WEBHOOK_BASTAO and consultor:",
+        "        message_template = '👑 **BASTÃO PASSADO!** 👑\\n\\n- **Novo Titular:** @{{consultor}}\\n- **Contagem Atual:** {{st.session_state.bastao_counts.get(consultor, 0)}}\\n- **Acesse o Painel:** {{APP_URL_CLOUD}}'",
+        "        message_text = message_template.format(consultor=consultor, APP_URL_CLOUD=APP_URL_CLOUD)",
+        "        chat_message = {'text': message_text}",
+        "        try:",
+        "            requests.post(CHAT_WEBHOOK_BASTAO, json=chat_message)",
+        "            return True",
+        "        except requests.exceptions.RequestException:",
+        "            return False",
+        "    return False",
         "",
         "def load_logs():",
         "    try:",
@@ -132,7 +134,7 @@ def generate_app_code(consultores, emoji, webhook_url):
         "",
         "init_session_state()",
         "",
-        # LÓGICA DO BASTÃO: Checa se deve assumir o bastão (Round Robin Simples)
+        # LÓGICA DO BASTÃO: Checa se deve assumir o bastão
         "def check_and_assume_baton(consultor=None):\n",
         "    current_responsavel = st.session_state['bastao_queue'][0] if st.session_state['bastao_queue'] else ''\n",
         "    \n",
@@ -141,30 +143,36 @@ def generate_app_code(consultores, emoji, webhook_url):
         "        return\n",
         "    \n",
         "    # 1. Itera sobre a fila para encontrar o próximo consultor *REALMENTE* disponível\n",
-        "    for index, nome in enumerate(st.session_state['bastao_queue']):",
+        "    fair_queue_candidates = []\n",
+        "    for nome in st.session_state['bastao_queue']:\n",
         "        current_status = st.session_state['status_texto'].get(nome, '')\n",
         "        \n",
         "        # Promoção só deve ocorrer se o status for VAZIO ('')\n",
         "        if current_status == '':\n",
-        "            novo_responsavel = nome\n",
-        "            \n",
-        "            # Limpa o status Bastão de quem quer que o estivesse segurando\n",
-        "            for c in CONSULTORES:\n",
-        "                if st.session_state['status_texto'].get(c) == 'Bastão':\n",
-        "                    st.session_state['status_texto'][c] = ''\n",
-        "                    \n",
-        "            st.session_state['status_texto'][novo_responsavel] = 'Bastão'\n",
-        "            st.session_state['bastao_start_time'] = datetime.now()\n",
-        "            st.session_state['current_status_starts'][novo_responsavel] = datetime.now()\n",
-        "            st.session_state['play_sound'] = True\n",
-        "            st.rerun() # Garante a atualização imediata após a promoção\n",
-        "            return\n",
+        "            fair_queue_candidates.append((nome, st.session_state['bastao_counts'].get(nome, 0)))\n",
         "    \n",
-        "    # Se o Bastão ainda estiver com status de Saída, limpamos o Bastão\n",
-        "    if current_responsavel and st.session_state['status_texto'].get(current_responsavel) in STATUSES_DE_SAIDA:\n",
-        "        st.session_state['status_texto'][current_responsavel] = ''\n",
+        "    if not fair_queue_candidates:\n",
+        "        # Se ninguém está disponível (status vazio), limpamos o Bastão.\n",
+        "        if current_responsavel and st.session_state['status_texto'].get(current_responsavel) in STATUSES_DE_SAIDA:\n",
+        "             st.session_state['status_texto'][current_responsavel] = ''\n",
         "        st.session_state['bastao_start_time'] = None\n",
-        "        st.rerun() # Garante que a caixa de Bastão fique limpa\n",
+        "        return\n",
+        "    \n",
+        "    # 2. Ordena para encontrar o consultor com a MENOR contagem de bastões\n",
+        "    sorted_candidates = sorted(fair_queue_candidates, key=itemgetter(1))\n",
+        "    novo_responsavel = sorted_candidates[0][0]\n",
+        "    \n",
+        "    # 3. Atribui o Bastão ao novo consultor\n",
+        "    for c in CONSULTORES:\n",
+        "        if st.session_state['status_texto'].get(c) == 'Bastão':\n",
+        "            st.session_state['status_texto'][c] = ''\n",
+        "            \n",
+        "    st.session_state['status_texto'][novo_responsavel] = 'Bastão'\n",
+        "    st.session_state['bastao_start_time'] = datetime.now()\n",
+        "    st.session_state['current_status_starts'][novo_responsavel] = datetime.now()\n",
+        "    st.session_state['play_sound'] = True\n",
+        "    send_chat_notification_troca(novo_responsavel)\n", # ENVIANDO NOTIFICAÇÃO
+        "    st.rerun() # Garante a atualização imediata após a promoção\n",
         "\n",
         "# --- Lógica de Fila e Status ---",
         "def update_queue(consultor):\n",
@@ -176,8 +184,18 @@ def generate_app_code(consultores, emoji, webhook_url):
         "        duration = datetime.now() - st.session_state['current_status_starts'][consultor]\n",
         "        log_status_change(consultor, old_status, 'Disponível na Fila', duration)\n",
         "        \n",
-        "        # Round Robin: Adiciona ao final da fila\n",
-        "        st.session_state['bastao_queue'].append(consultor)\n",
+        "        # Lógica de prioridade de retorno\n",
+        "        priority_queue = st.session_state.get('priority_return_queue', [])\n",
+        "        \n",
+        "        if consultor in priority_queue:\n",
+        "            if st.session_state['bastao_queue']:\n",
+        "                st.session_state['bastao_queue'].insert(1, consultor)\n",
+        "            else:\n",
+        "                st.session_state['bastao_queue'].append(consultor)\n",
+        "            priority_queue.remove(consultor)\n",
+        "        else:\n",
+        "            st.session_state['bastao_queue'].append(consultor)\n",
+        "            \n",
         "        st.session_state['status_texto'][consultor] = ''\n",
         "        check_and_assume_baton(consultor)\n",
         "    elif not is_checked and consultor in st.session_state['bastao_queue']:\n",
@@ -231,13 +249,15 @@ def generate_app_code(consultores, emoji, webhook_url):
         "        is_current_holder = selected_name == st.session_state['bastao_queue'][0] if st.session_state['bastao_queue'] else ''\n",
         "        \n",
         "        if is_current_holder and status_text != 'Bastão' and status_text != '':\n",
-        "            # 1. Remove o titular da primeira posição\n",
         "            st.session_state['bastao_queue'].remove(selected_name)\n",
         "            \n",
-        "            # 2. Reinsere o consultor no final da fila (Round Robin)\n",
-        "            st.session_state['bastao_queue'].append(selected_name)\n",
+        "            if status_text in STATUS_SAIDA_PRIORIDADE:\n",
+        "                if selected_name not in st.session_state['priority_return_queue']:\n",
+        "                    st.session_state['priority_return_queue'].append(selected_name)\n",
+        "            else:\n",
+        "                st.session_state['bastao_queue'].append(selected_name)\n",
         "            \n",
-        "            check_and_assume_baton() # Promove o próximo\n",
+        "            check_and_assume_baton() \n",
         "        \n",
         "        st.rerun()",
         "\n",
@@ -249,7 +269,6 @@ def generate_app_code(consultores, emoji, webhook_url):
         "            st.rerun()",
         "",
         "# --- INÍCIO DA APLICAÇÃO STREAMLIT ---",
-        "# CSS para ocultar o aviso 'no-op' e garantir interface limpa\n",
         "st.markdown(\"""<style>div.stAlert { display: none !important; }</style>\"\"\", unsafe_allow_html=True)",
         
         'st.set_page_config(page_title="Controle Bastão Cesupe", layout="wide")',
@@ -343,7 +362,9 @@ def generate_app_code(consultores, emoji, webhook_url):
         "        display_status = ''",
         "        \n",
         "        # Lógica de exibição de Prioridade de Retorno\n",
-        "        if current_status_text == 'Bastão':",
+        "        if nome in st.session_state.get('priority_return_queue', []):\n",
+        "            display_status = '<span style=\"color:#ffc107;\">⚠️ Retorno Prioritário</span>'\n",
+        "        elif current_status_text == 'Bastão':",
         "            display_status = f'<span style=\"color:{status_color};\">**{status_emoji} BASTÃO**</span>'",
         "        elif current_status_text != '' and not is_available:",
         "            display_status = f'<span style=\"color:{status_color};\">{status_emoji} {current_status_text}</span>'",
@@ -369,7 +390,7 @@ def generate_app_code(consultores, emoji, webhook_url):
     return "\n".join(app_code_lines)
 
 # 5. Salva o código no arquivo 'app.py'
-app_code_final = generate_app_code(CONSULTORES, BASTAO_EMOJI, GOOGLE_CHAT_WEBHOOK_URL)
+app_code_final = generate_app_code(CONSULTORES, BASTAO_EMOJI, CHAT_WEBHOOK_BASTAO)
 
 with open('app.py', 'w') as f:
     f.write(app_code_final)
