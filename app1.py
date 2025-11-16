@@ -59,7 +59,7 @@ GOOGLE_CHAT_WEBHOOK_CHAMADO = "https://chat.googleapis.com/v1/spaces/AAQAPPWlpW8
 
 # Formulário "Atividade"
 REG_USUARIO_OPCOES = ["Cartório", "Externo", "Gabinete", "Interno"]
-REG_SISTEMA_OPCOES = ["Conveniados/Outros", "Eproc", "Themis", "JIPE", "SIAP"]
+REG_SISTEMA_OPCOES = ["Conveniados/Outros", "Eproc", "Themis", "JPE", "SIAP"]
 REG_CANAL_OPCOES = ["Email", "Telefone", "Whatsapp"]
 REG_DESFECHO_OPCOES = ["Escalonado", "Resolvido - Cesupe"]
 # Formulário "Presencial"
