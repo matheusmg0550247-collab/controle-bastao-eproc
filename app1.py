@@ -45,9 +45,9 @@ def get_global_state_cache():
         'bastao_counts': {nome: 0 for nome in CONSULTORES},
         'priority_return_queue': [],
         'rotation_gif_start_time': None,
-        'lunch_warning_info': None, # Aviso de almoço Global
-        'auxilio_ativo': False, # Estado do botão de auxílio
-        'daily_logs': [] # Log persistente para o relatório
+        'lunch_warning_info': None,
+        'auxilio_ativo': False, 
+        'daily_logs': [] 
     }
 
 # --- Constantes (Webhooks) ---
@@ -74,16 +74,12 @@ CAMARAS_DICT = {
 }
 CAMARAS_OPCOES = sorted(list(CAMARAS_DICT.keys()))
 
-# --- NOVAS CONSTANTES SOLICITADAS ---
 OPCOES_ATIVIDADES_STATUS = [
     "HP", "E-mail", "WhatsApp Plantão", 
     "Treinamento", "Homologação", "Redação Documentos", "Reunião", "Outros"
 ]
 GIF_BASTAO_HOLDER = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExa3Uwazd5cnNra2oxdDkydjZkcHdqcWN2cng0Y2N0cmNmN21vYXVzMiZlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/3rXs5J0hZkXwTZjuvM/giphy.gif"
-
-# AQUI MUDOU O EMOJI
 BASTAO_EMOJI = "🎄" 
-
 APP_URL_CLOUD = 'https://controle-bastao-cesupe.streamlit.app'
 STATUS_SAIDA_PRIORIDADE = ['Saída rápida']
 STATUSES_DE_SAIDA = ['Atendimento', 'Almoço', 'Saída rápida', 'Ausente', 'Sessão'] 
@@ -92,8 +88,6 @@ GIF_URL_ROTATION = 'https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExdmx4azVxbG
 GIF_URL_LUNCH_WARNING = 'https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExMGZlbHN1azB3b2drdTI1eG10cDEzeWpmcmtwenZxNTV0bnc2OWgzZSYlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/bNlqpmBJRDMpxulfFB/giphy.gif'
 GIF_URL_NEDRY = 'https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExMGNkMGx3YnNkcXQ2bHJmNTZtZThraHhuNmVoOTNmbG0wcDloOXAybiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7kyWoqTue3po4/giphy.gif'
 SOUND_URL = "https://github.com/matheusmg0550247-collab/controle-bastao-eproc2/raw/main/doorbell-223669.mp3"
-
-# --- IMAGEM DE NATAL (PUGNOEL) ---
 PUGNOEL_URL = "https://github.com/matheusmg0550247-collab/controle-bastao-eproc2/raw/main/Pugnoel.png"
 
 # ============================================
@@ -107,7 +101,6 @@ def date_serializer(obj):
     return str(obj)
 
 def save_state():
-    """Salva o estado da sessão local (st.session_state) no cache GLOBAL."""
     global_data = get_global_state_cache()
     try:
         global_data['status_texto'] = st.session_state.status_texto.copy()
@@ -126,17 +119,13 @@ def save_state():
         print(f'Erro ao salvar estado GLOBAL: {e}')
 
 def load_state():
-    """Carrega o estado do cache GLOBAL."""
     global_data = get_global_state_cache()
-    
     loaded_logs = global_data.get('daily_logs', [])
     if loaded_logs and isinstance(loaded_logs[0], dict):
              deserialized_logs = loaded_logs
     else:
-        try: 
-             deserialized_logs = json.loads(loaded_logs)
-        except: 
-             deserialized_logs = loaded_logs 
+        try: deserialized_logs = json.loads(loaded_logs)
+        except: deserialized_logs = loaded_logs 
     
     final_logs = []
     for log in deserialized_logs:
@@ -151,8 +140,30 @@ def load_state():
 
     loaded_data = {k: v for k, v in global_data.items() if k != 'daily_logs'}
     loaded_data['daily_logs'] = final_logs
-    
     return loaded_data
+
+def log_status_change(consultor, old_status, new_status, duration):
+    print(f'LOG: {consultor} de "{old_status or "-"}" para "{new_status or "-"}" após {duration}')
+    if not isinstance(duration, timedelta): duration = timedelta(0)
+
+    entry = {
+        'timestamp': datetime.now(),
+        'consultor': consultor,
+        'old_status': old_status, 
+        'new_status': new_status,
+        'duration': duration,
+        'duration_s': duration.total_seconds()
+    }
+    st.session_state.daily_logs.append(entry)
+    
+    if consultor not in st.session_state.current_status_starts:
+        st.session_state.current_status_starts[consultor] = datetime.now()
+    st.session_state.current_status_starts[consultor] = datetime.now()
+
+def format_time_duration(duration):
+    if not isinstance(duration, timedelta): return '--:--:--'
+    s = int(duration.total_seconds()); h, s = divmod(s, 3600); m, s = divmod(s, 60)
+    return f'{h:02}:{m:02}:{s:02}'
 
 def send_chat_notification_internal(consultor, status):
     if CHAT_WEBHOOK_BASTAO and status == 'Bastão':
@@ -160,58 +171,33 @@ def send_chat_notification_internal(consultor, status):
         message_text = message_template.format(consultor=consultor, app_url=APP_URL_CLOUD) 
         chat_message = {"text": message_text}
         try:
-            response = requests.post(CHAT_WEBHOOK_BASTAO, json=chat_message)
-            response.raise_for_status()
-            print(f"Notificação de bastão enviada para {consultor}")
+            requests.post(CHAT_WEBHOOK_BASTAO, json=chat_message)
             return True
-        except requests.exceptions.RequestException as e:
-            print(f"Erro ao enviar notificação de bastão: {e}")
-            return False
+        except: return False
     return False
 
 def play_sound_html(): return f'<audio autoplay="true"><source src="{SOUND_URL}" type="audio/mpeg"></audio>'
 
-# --- Efeito de Neve (CSS) ---
 def render_snow_effect():
     snow_css = """
     <style>
-    /* customizable snowflake styling */
-    .snowflake {
-      color: #fff;
-      font-size: 1em;
-      font-family: Arial;
-      text-shadow: 0 0 1px #000;
-    }
-
+    .snowflake { color: #fff; font-size: 1em; font-family: Arial; text-shadow: 0 0 1px #000; }
     @-webkit-keyframes snowflakes-fall{0%{top:-10%}100%{top:100%}}@-webkit-keyframes snowflakes-shake{0%{-webkit-transform:translateX(0px);transform:translateX(0px)}50%{-webkit-transform:translateX(80px);transform:translateX(80px)}100%{-webkit-transform:translateX(0px);transform:translateX(0px)}}@keyframes snowflakes-fall{0%{top:-10%}100%{top:100%}}@keyframes snowflakes-shake{0%{transform:translateX(0px)}50%{transform:translateX(80px)}100%{transform:translateX(0px)}}.snowflake{position:fixed;top:-10%;z-index:9999;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;cursor:default;-webkit-animation-name:snowflakes-fall,snowflakes-shake;-webkit-animation-duration:10s,3s;-webkit-animation-timing-function:linear,ease-in-out;-webkit-animation-iteration-count:infinite,infinite;-webkit-animation-play-state:running,running;animation-name:snowflakes-fall,snowflakes-shake;animation-duration:10s,3s;animation-timing-function:linear,ease-in-out;animation-iteration-count:infinite,infinite;animation-play-state:running,running}.snowflake:nth-of-type(0){left:1%;-webkit-animation-delay:0s,0s;animation-delay:0s,0s}.snowflake:nth-of-type(1){left:10%;-webkit-animation-delay:1s,1s;animation-delay:1s,1s}.snowflake:nth-of-type(2){left:20%;-webkit-animation-delay:6s,.5s;animation-delay:6s,.5s}.snowflake:nth-of-type(3){left:30%;-webkit-animation-delay:4s,2s;animation-delay:4s,2s}.snowflake:nth-of-type(4){left:40%;-webkit-animation-delay:2s,2s;animation-delay:2s,2s}.snowflake:nth-of-type(5){left:50%;-webkit-animation-delay:8s,3s;animation-delay:8s,3s}.snowflake:nth-of-type(6){left:60%;-webkit-animation-delay:6s,2s;animation-delay:6s,2s}.snowflake:nth-of-type(7){left:70%;-webkit-animation-delay:2.5s,1s;animation-delay:2.5s,1s}.snowflake:nth-of-type(8){left:80%;-webkit-animation-delay:1s,0s;animation-delay:1s,0s}.snowflake:nth-of-type(9){left:90%;-webkit-animation-delay:3s,1.5s;animation-delay:3s,1.5s}
     </style>
     <div class="snowflakes" aria-hidden="true">
-      <div class="snowflake">❅</div>
-      <div class="snowflake">❅</div>
-      <div class="snowflake">❆</div>
-      <div class="snowflake">❄</div>
-      <div class="snowflake">❅</div>
-      <div class="snowflake">❆</div>
-      <div class="snowflake">❄</div>
-      <div class="snowflake">❅</div>
-      <div class="snowflake">❆</div>
-      <div class="snowflake">❄</div>
+      <div class="snowflake">❅</div><div class="snowflake">❅</div><div class="snowflake">❆</div><div class="snowflake">❄</div><div class="snowflake">❅</div>
+      <div class="snowflake">❆</div><div class="snowflake">❄</div><div class="snowflake">❅</div><div class="snowflake">❆</div><div class="snowflake">❄</div>
     </div>
     """
     st.markdown(snow_css, unsafe_allow_html=True)
 
-# --- Função Geradora do HTML Personalizado (COM TEMA VERMELHO) ---
 def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
-    """Gera o código HTML do checklist com tema vermelho de Natal."""
-    
     consultor_formatado = f"@{consultor_nome}" if not consultor_nome.startswith("@") else consultor_nome
     webhook_destino = GOOGLE_CHAT_WEBHOOK_CHECKLIST_HTML
     
-    # Paleta de cores vermelha
-    primary_red = "#8B0000" # Vermelho escuro para textos e bordas
-    light_red_bg = "#FFEBEE" # Fundo vermelho bem claro
-    accent_red = "#D42426" # Vermelho vibrante para destaques
-
+    primary_red = "#8B0000"
+    light_red_bg = "#FFEBEE"
+    
     html_template = f"""
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -224,32 +210,23 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
     .container {{ max-width: 800px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
     h1 {{ color: {primary_red}; font-size: 24px; border-bottom: 2px solid {primary_red}; padding-bottom: 10px; margin-bottom: 20px; }}
     .intro-box {{ background-color: {light_red_bg}; border-left: 5px solid {primary_red}; padding: 15px; margin-bottom: 25px; font-size: 14px; line-height: 1.5; }}
-    
     .row-flex {{ display: flex; gap: 20px; margin-bottom: 20px; align-items: flex-end; }}
     .col-flex {{ flex: 1; }}
-    
     .field-label {{ font-weight: bold; display: block; margin-bottom: 5px; color: #444; }}
     .static-value {{ background-color: #f9f9f9; padding: 10px; border: 1px solid #ddd; border-radius: 4px; color: #555; font-weight: 500; min-height: 20px; display: flex; align-items: center; }}
     select, input[type="text"] {{ width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; }}
-    
     .field-group {{ margin-bottom: 20px; }}
-
     .section-header {{ background-color: {primary_red}; color: white; padding: 10px 15px; border-radius: 4px; margin-top: 25px; margin-bottom: 15px; font-size: 15px; font-weight: bold; }}
-    
     .checklist-title {{ font-size: 22px; font-weight: bold; color: #333; margin-top: 30px; margin-bottom: 5px; }}
     .checklist-desc {{ font-size: 14px; color: #666; font-style: italic; margin-bottom: 20px; }}
-    
     .checkbox-item {{ margin-bottom: 15px; display: flex; align-items: flex-start; border-bottom: 1px solid #eee; padding-bottom: 10px; }}
     .checkbox-item:last-child {{ border-bottom: none; }}
     .checkbox-item input[type="checkbox"] {{ margin-right: 10px; margin-top: 3px; width: 18px; height: 18px; accent-color: {primary_red}; cursor: pointer; flex-shrink: 0; }}
     .checkbox-item label {{ cursor: pointer; line-height: 1.4; font-size: 14px; color: #444; }}
     .checkbox-item label strong {{ color: #000; }}
-    
     .other-input {{ margin-top: 5px; width: 100%; display: none; margin-left: 28px; }}
-    
     .btn-submit {{ background-color: #28a745; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 4px; cursor: pointer; display: block; width: 100%; margin-top: 30px; transition: background 0.3s; font-weight: bold; }}
     .btn-submit:hover {{ background-color: #218838; }}
-    
     .hidden {{ display: none; }}
 </style>
 <script>
@@ -257,7 +234,6 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
         const setor = document.getElementById("setor").value;
         const divCartorio = document.getElementById("checklist-cartorio-container");
         const divGabinete = document.getElementById("checklist-gabinete-container");
-        
         if (setor === "Cartório") {{
             divCartorio.style.display = "block";
             divGabinete.style.display = "none";
@@ -266,11 +242,9 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             divGabinete.style.display = "block";
         }}
     }}
-
     function toggleOther(checkboxId, inputId) {{
         const checkboxEl = document.getElementById(checkboxId);
         const inputEl = document.getElementById(inputId);
-        
         if (checkboxEl.checked) {{
             inputEl.style.display = "block";
             inputEl.focus();
@@ -279,28 +253,22 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             inputEl.value = ""; 
         }}
     }}
-
     function enviarWebhook() {{
         const webhookUrl = '{webhook_destino}';
-        
         const nomeUsuario = document.getElementById('nome_usuario').value;
         if (!nomeUsuario) {{
             alert("Por favor, preencha o nome do Responsável antes de enviar.");
             return;
         }}
-
         const setor = document.getElementById('setor').value;
-        
         let containerAtivo;
         if (setor === "Cartório") {{
             containerAtivo = document.getElementById("checklist-cartorio-container");
         }} else {{
             containerAtivo = document.getElementById("checklist-gabinete-container");
         }}
-        
         const checks = containerAtivo.querySelectorAll('input[type="checkbox"]:checked');
         let itensMarcados = [];
-        
         checks.forEach((chk) => {{
             let val = "- " + chk.value;
             if (chk.id === "c_chk_outros_pre") {{
@@ -321,24 +289,18 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             }}
             itensMarcados.push(val);
         }});
-        
         if (itensMarcados.length === 0 && confirm("Nenhuma dúvida foi marcada. Deseja enviar mesmo assim como 'Sem dúvidas'?") === false) {{
             return;
         }}
-        
         const dataSessaoStr = "{data_sessao_formatada}";
         const parts = dataSessaoStr.split('/');
         const dataSessaoObj = new Date(parts[2], parts[1] - 1, parts[0]);
-        
         const hoje = new Date();
         hoje.setHours(0,0,0,0);
-        
         let consultorResponsavel = "{consultor_formatado}";
-        
         if (hoje > dataSessaoObj) {{
             consultorResponsavel = "Atendimento";
         }}
-        
         const msgTexto = 
             "*📝 Retorno de Checklist de Sessão*\\n" +
             "*Câmara:* {camara_nome}\\n" +
@@ -347,9 +309,7 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             "*Consultor(a) Técnico(a):* " + consultorResponsavel + "\\n" +
             "*Setor:* " + setor + "\\n\\n" +
             "*Dúvidas/Pontos de Atenção:*" + (itensMarcados.length > 0 ? "\\n" + itensMarcados.join("\\n") : "\\nNenhuma dúvida reportada (Checklist OK).");
-
         const payload = {{ text: msgTexto }};
-
         fetch(webhookUrl, {{
             method: 'POST',
             headers: {{ 'Content-Type': 'application/json' }},
@@ -367,23 +327,19 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             alert('Erro ao enviar (Verifique sua conexão).');
         }});
     }}
-    
     window.onload = function() {{
         toggleSetor();
     }};
 </script>
 </head>
 <body>
-
 <div class="container">
     <h1>Acompanhamento de Sessão</h1>
-    
     <div class="intro-box">
         <strong>Olá!</strong> Sou o(a) consultor(a) <strong>{consultor_nome}</strong> responsável pelo acompanhamento técnico da sua sessão.<br><br>
         Meu objetivo é garantir que todos os trâmites ocorram com fluidez na data agendada <strong>({data_sessao_formatada})</strong>. Abaixo, apresento um check-list dos procedimentos essenciais.<br><br>
         <strong>Caso tenha dúvida ou insegurança em alguma etapa, marque a caixa correspondente e envie o formulário.</strong> Isso me permitirá atuar preventivamente.
     </div>
-
     <div class="row-flex">
         <div class="col-flex">
             <label class="field-label">Câmara:</label>
@@ -394,12 +350,10 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             <input type="text" id="nome_usuario" placeholder="Digite seu nome">
         </div>
     </div>
-
     <div class="field-group">
         <label class="field-label">Data da Sessão:</label>
         <div class="static-value">{data_sessao_formatada}</div>
     </div>
-
     <div class="field-group">
         <label class="field-label">Qual é o seu Setor?</label>
         <select id="setor" onchange="toggleSetor()">
@@ -407,13 +361,10 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             <option value="Gabinete">Gabinete</option>
         </select>
     </div>
-    
     <div id="checklist-cartorio-container">
         <div class="checklist-title">Check-list: Cartório (Secretaria)</div>
         <div class="checklist-desc">Fase Pré-Sessão: Inicia a partir do fechamento da pauta até a abertura da sessão.</div>
-        
         <div class="section-header">I. Pré-Sessão</div>
-        
         <div class="checkbox-item">
             <input type="checkbox" id="c_chk1" value="Cartório Pré: Verificar Manifestações Desembargadores">
             <label for="c_chk1"><strong>Verificar Manifestações:</strong> Certificar-se de que todos os desembargadores manifestaram: Pedidos de vista, Retirados de pauta, Acompanhamento de voto, Votos de declaração, Votos divergentes.</label>
@@ -430,15 +381,12 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             <input type="checkbox" id="c_chk4" value="Cartório Pré: Verificar Manter Voto (Retirados)">
             <label for="c_chk4"><strong>Verificar Manter Voto:</strong> Conferir se o gabinete marcou a opção de manter o voto para próxima sessão, em processos retirados de pauta.</label>
         </div>
-        
         <div class="checkbox-item" style="flex-wrap: wrap;">
             <input type="checkbox" id="c_chk_outros_pre" value="Cartório Pré-Sessão: Outros" onclick="toggleOther('c_chk_outros_pre', 'c_input_outros_pre')">
             <label for="c_chk_outros_pre"><strong>Outros na Preparação:</strong> (Descreva abaixo)</label>
             <input type="text" id="c_input_outros_pre" class="other-input" placeholder="Detalhes da dúvida na Pré-Sessão...">
         </div>
-
         <div class="section-header">II. Durante e Pós-Sessão</div>
-
         <div class="checkbox-item">
             <input type="checkbox" id="c_chk5" value="Cartório Pós: Abrir a Sessão">
             <label for="c_chk5"><strong>Início da Sessão:</strong> Acompanhar o Cartório ao "Abrir a sessão".</label>
@@ -455,12 +403,10 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             <input type="checkbox" id="c_chk8" value="Cartório Pós: Encerrar e Gerar Ata">
             <label for="c_chk8"><strong>Finalização:</strong> "Encerrar da sessão" e "Gerar ata".</label>
         </div>
-
         <div class="checkbox-item">
             <input type="checkbox" id="c_chk_olhinho" value="Cartório Pós: Conferência da Sessão (Olhinho)">
             <label for="c_chk_olhinho"><strong>Conferência da Sessão:</strong> Após o lançamento dos resultados e encerramento, utilizar o ícone "Conferência da sessão de julgamento" (ícone do olhinho) para verificar o relatório de inconsistências/erros e realizar a correção.</label>
         </div>
-
         <div class="checkbox-item">
             <input type="checkbox" id="c_chk9" value="Cartório Pós: Minutas não Assinadas (Filtro)">
             <label for="c_chk9"><strong>Pós-Sessão:</strong> Orientar sobre a Aplicação do filtro – Minutas não assinadas e necessidade de contato com gabinetes para assinatura.</label>
@@ -469,20 +415,16 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             <input type="checkbox" id="c_chk10" value="Cartório Pós: Conferir Manter Voto (Retirados Pós)">
             <label for="c_chk10"><strong>Pós-Sessão:</strong> Verificar se há processos retirados de pauta e conferir a marcação do gabinete para manter o processo para próxima sessão.</label>
         </div>
-        
         <div class="checkbox-item" style="flex-wrap: wrap;">
             <input type="checkbox" id="c_chk_outros_pos" value="Cartório Pós-Sessão: Outros" onclick="toggleOther('c_chk_outros_pos', 'c_input_outros_pos')">
             <label for="c_chk_outros_pos"><strong>Outros no Encerramento:</strong> (Descreva abaixo)</label>
             <input type="text" id="c_input_outros_pos" class="other-input" placeholder="Detalhes da dúvida na Pós-Sessão...">
         </div>
     </div>
-
     <div id="checklist-gabinete-container" class="hidden">
         <div class="checklist-title">Check-list: Gabinete</div>
         <div class="checklist-desc">Foco na análise processual, votos e disponibilização de documentos.</div>
-        
         <div class="section-header">I. Pré-Sessão (Análise e Inclusão)</div>
-        
         <div class="checkbox-item">
             <input type="checkbox" id="g_chk1" value="Gabinete Pré: Inclusão e Minutas">
             <label for="g_chk1"><strong>Inclusão/Minutas:</strong> Selecionar processos para inclusão na sessão e criar Relatório/Voto liberando visualização para Colegiado.</label>
@@ -491,15 +433,12 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             <input type="checkbox" id="g_chk2" value="Gabinete Pré: Destaques/Vistas">
             <label for="g_chk2"><strong>Destaques/Vistas:</strong> Analisar divergências/vistas e inserir destaques próprios.</label>
         </div>
-        
         <div class="checkbox-item" style="flex-wrap: wrap;">
             <input type="checkbox" id="g_chk_outros_pre" value="Gabinete Pré-Sessão: Outros" onclick="toggleOther('g_chk_outros_pre', 'g_input_outros_pre')">
             <label for="g_chk_outros_pre"><strong>Outros na Preparação:</strong> (Descreva abaixo)</label>
             <input type="text" id="g_input_outros_pre" class="other-input" placeholder="Detalhes da dúvida na Pré-Sessão...">
         </div>
-
         <div class="section-header">II. Pós-Sessão (Formalização)</div>
-
         <div class="checkbox-item">
             <input type="checkbox" id="g_chk5" value="Gabinete Pós: Filtro minutas para assinar">
             <label for="g_chk5"><strong>Assinatura:</strong> Aplicar o "Filtro minutas para assinar" e realizar a assinatura do Relatório/Voto/Acórdão no status "Para Assinar".</label>
@@ -508,77 +447,31 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
             <input type="checkbox" id="g_chk6" value="Gabinete Pós: Juntada e Evento Final">
             <label for="g_chk6"><strong>Movimentação Final:</strong> Juntada de relatório/voto/acórdão e Lançamento do Evento “Remetidos os votos com acórdão”.</label>
         </div>
-        
         <div class="checkbox-item" style="flex-wrap: wrap;">
             <input type="checkbox" id="g_chk_outros_pos" value="Gabinete Pós-Sessão: Outros" onclick="toggleOther('g_chk_outros_pos', 'g_input_outros_pos')">
             <label for="g_chk_outros_pos"><strong>Outros na Formalização:</strong> (Descreva abaixo)</label>
             <input type="text" id="g_input_outros_pos" class="other-input" placeholder="Detalhes da dúvida na Pós-Sessão...">
         </div>
     </div>
-
     <button class="btn-submit" onclick="enviarWebhook()">Enviar Dúvidas ao(à) Consultor(a)</button>
 </div>
-
 </body>
 </html>
     """
     return html_template
 
-# --- Funções de Envio de Registro ---
-
 def send_sessao_to_chat(consultor, texto_mensagem):
     if not GOOGLE_CHAT_WEBHOOK_SESSAO: return False
     if not consultor or consultor == 'Selecione um nome': return False
-    if not texto_mensagem: return False 
-
     chat_message = {'text': texto_mensagem}
     try:
-        response = requests.post(GOOGLE_CHAT_WEBHOOK_SESSAO, json=chat_message)
-        response.raise_for_status()
+        requests.post(GOOGLE_CHAT_WEBHOOK_SESSAO, json=chat_message)
         return True
-    except requests.exceptions.RequestException as e:
-        print(f"Erro ao enviar mensagem de Sessão: {e}")
-        return False
-
-def load_logs(): 
-    return st.session_state.get('daily_logs', []).copy()
-
-def save_logs(l): 
-    st.session_state.daily_logs = l
-
-def log_status_change(consultor, old_status, new_status, duration):
-    """Registra uma mudança de status na lista de logs da sessão."""
-    print(f'LOG: {consultor} de "{old_status or "-"}" para "{new_status or "-"}" após {duration}')
-    if not isinstance(duration, timedelta): duration = timedelta(0)
-
-    entry = {
-        'timestamp': datetime.now(),
-        'consultor': consultor,
-        'old_status': old_status, 
-        'new_status': new_status,
-        'duration': duration,
-        'duration_s': duration.total_seconds()
-    }
-    st.session_state.daily_logs.append(entry)
-    
-    if consultor not in st.session_state.current_status_starts:
-        st.session_state.current_status_starts[consultor] = datetime.now()
-    st.session_state.current_status_starts[consultor] = datetime.now()
-
-
-def format_time_duration(duration):
-    """Formata um objeto timedelta para H:M:S."""
-    if not isinstance(duration, timedelta): return '--:--:--'
-    s = int(duration.total_seconds()); h, s = divmod(s, 3600); m, s = divmod(s, 60)
-    return f'{h:02}:{m:02}:{s:02}'
+    except: return False
 
 def send_daily_report(): 
-    """Agrega os logs e contagens e envia o relatório diário."""
-    print("Iniciando envio do relatório diário...")
-    
     logs = load_logs() 
     bastao_counts = st.session_state.bastao_counts.copy()
-    
     aggregated_data = {nome: {} for nome in CONSULTORES}
     
     for log in logs:
@@ -586,22 +479,18 @@ def send_daily_report():
             consultor = log['consultor']
             status = log['old_status']
             duration = log.get('duration', timedelta(0))
-            
             if not isinstance(duration, timedelta):
                 try: duration = timedelta(seconds=float(duration))
                 except: duration = timedelta(0)
-
             if status and consultor in aggregated_data:
                 current_duration = aggregated_data[consultor].get(status, timedelta(0))
                 aggregated_data[consultor][status] = current_duration + duration
-        except Exception as e:
-            print(f"Erro ao processar log: {e} - Log: {log}")
+        except: pass
 
     today_str = datetime.now().strftime("%d/%m/%Y")
     report_text = f"📊 **Relatório Diário de Atividades - {today_str}** 📊\n\n"
     
     consultores_com_dados = []
-
     for nome in CONSULTORES:
         counts = bastao_counts.get(nome, 0)
         times = aggregated_data.get(nome, {})
@@ -609,18 +498,14 @@ def send_daily_report():
         
         if counts > 0 or times:
             consultores_com_dados.append(nome)
-            # AQUI: MUDANÇA PARA O EMOJI DE ÁRVORE NO RELATÓRIO
             report_text += f"**👤 {nome}**\n"
             report_text += f"- {BASTAO_EMOJI} Bastão Recebido: **{counts}** vez(es)\n"
             report_text += f"- ⏱️ Tempo com Bastão: **{format_time_duration(bastao_time)}**\n"
-            
             other_statuses = []
             sorted_times = sorted(times.items(), key=itemgetter(0)) 
-            
             for status, time in sorted_times:
                 if status != 'Bastão' and status:
                     other_statuses.append(f"{status}: **{format_time_duration(time)}**")
-            
             if other_statuses:
                 report_text += f"- ⏳ Outros Tempos: {', '.join(other_statuses)}\n\n"
             else:
@@ -633,22 +518,15 @@ def send_daily_report():
 
     chat_message = {'text': report_text}
     try:
-        response = requests.post(GOOGLE_CHAT_WEBHOOK_BACKUP, json=chat_message)
-        response.raise_for_status() 
-        print("Relatório diário enviado com sucesso.")
-        
+        requests.post(GOOGLE_CHAT_WEBHOOK_BACKUP, json=chat_message)
         st.session_state['report_last_run_date'] = datetime.now()
         st.session_state['daily_logs'] = []
         st.session_state['bastao_counts'] = {nome: 0 for nome in CONSULTORES}
         save_state() 
-
-    except requests.exceptions.RequestException as e:
-        print(f'Erro ao enviar relatório diário: {e}')
+    except: pass
 
 def init_session_state():
-    """Inicializa/sincroniza o st.session_state com o estado GLOBAL do cache."""
     persisted_state = load_state()
-    
     defaults = {
         'bastao_start_time': None, 
         'report_last_run_date': datetime.min, 
@@ -663,13 +541,11 @@ def init_session_state():
         'html_content_cache': "", 
         'auxilio_ativo': False,
         'show_activity_menu': False,
-        'show_sessao_dialog': False # NOVO ESTADO
+        'show_sessao_dialog': False,
+        'show_sessao_eproc_dialog': False 
     }
-
     for key, default in defaults.items():
-        if key in ['play_sound', 'gif_warning', 'last_reg_status', 'chamado_guide_step', 'sessao_msg_preview', 'html_download_ready', 'html_content_cache', 'show_activity_menu', 'show_sessao_dialog']: 
-            st.session_state.setdefault(key, default)
-        else: 
+        if key not in st.session_state:
             st.session_state[key] = persisted_state.get(key, default)
 
     st.session_state['bastao_queue'] = persisted_state.get('bastao_queue', []).copy()
@@ -679,19 +555,15 @@ def init_session_state():
     st.session_state['status_texto'] = persisted_state.get('status_texto', {}).copy()
     st.session_state['current_status_starts'] = persisted_state.get('current_status_starts', {}).copy()
     st.session_state['daily_logs'] = persisted_state.get('daily_logs', []).copy() 
-    
     st.session_state['auxilio_ativo'] = persisted_state.get('auxilio_ativo', False)
 
     for nome in CONSULTORES:
         st.session_state.bastao_counts.setdefault(nome, 0)
         st.session_state.skip_flags.setdefault(nome, False)
-        
         current_status = st.session_state.status_texto.get(nome, 'Indisponível') 
         st.session_state.status_texto.setdefault(nome, current_status)
-        
         is_available = (current_status == 'Bastão' or current_status == '') and nome not in st.session_state.priority_return_queue
         st.session_state[f'check_{nome}'] = is_available
-        
         if nome not in st.session_state.current_status_starts:
                  st.session_state.current_status_starts[nome] = datetime.now()
 
@@ -702,12 +574,10 @@ def init_session_state():
     check_and_assume_baton()
 
 def find_next_holder_index(current_index, queue, skips):
-    """Encontra o próximo consultor elegível na fila."""
     if not queue: return -1
     num_consultores = len(queue)
     if num_consultores == 0: return -1
     if current_index >= num_consultores or current_index < -1: current_index = -1
-
     next_idx = (current_index + 1) % num_consultores
     attempts = 0
     while attempts < num_consultores:
@@ -718,19 +588,14 @@ def find_next_holder_index(current_index, queue, skips):
         attempts += 1
     return -1
 
-
 def check_and_assume_baton():
-    """Verifica o estado do bastão e o atribui/remove conforme necessário."""
     queue = st.session_state.bastao_queue
     skips = st.session_state.skip_flags
     current_holder_status = next((c for c, s in st.session_state.status_texto.items() if s == 'Bastão'), None)
-    is_current_valid = (current_holder_status
-                        and current_holder_status in queue
-                        and st.session_state.get(f'check_{current_holder_status}'))
-
+    is_current_valid = (current_holder_status and current_holder_status in queue and st.session_state.get(f'check_{current_holder_status}'))
     first_eligible_index = find_next_holder_index(-1, queue, skips)
     first_eligible_holder = queue[first_eligible_index] if first_eligible_index != -1 else None
-
+    
     should_have_baton = None
     if is_current_valid:
         should_have_baton = current_holder_status
@@ -772,17 +637,11 @@ def check_and_assume_baton():
         save_state()
     return changed
 
-# ============================================
-# 3. FUNÇÕES DE CALLBACK GLOBAIS
-# ============================================
-
 def update_queue(consultor):
     st.session_state.gif_warning = False; st.session_state.rotation_gif_start_time = None
     st.session_state.lunch_warning_info = None 
-    
     is_checked = st.session_state.get(f'check_{consultor}') 
     old_status_text = st.session_state.status_texto.get(consultor, '')
-    was_holder_before = consultor == next((c for c, s in st.session_state.status_texto.items() if s == 'Bastão'), None)
     duration = datetime.now() - st.session_state.current_status_starts.get(consultor, datetime.now())
 
     if is_checked: 
@@ -793,13 +652,10 @@ def update_queue(consultor):
         st.session_state.skip_flags[consultor] = False 
         if consultor in st.session_state.priority_return_queue:
             st.session_state.priority_return_queue.remove(consultor)
-            
     else: 
         if old_status_text not in STATUSES_DE_SAIDA and old_status_text != 'Bastão':
-            log_old_status = old_status_text or ('Bastão' if was_holder_before else 'Disponível')
-            log_status_change(consultor, log_old_status , 'Indisponível', duration)
+            log_status_change(consultor, old_status_text , 'Indisponível', duration)
             st.session_state.status_texto[consultor] = 'Indisponível' 
-        
         if consultor in st.session_state.bastao_queue:
             st.session_state.bastao_queue.remove(consultor)
         st.session_state.skip_flags.pop(consultor, None) 
@@ -827,40 +683,36 @@ def rotate_bastao():
         if check_and_assume_baton(): pass 
         return
 
-    # Tenta achar o próximo com as regras atuais
+    # --- LÓGICA SIMPLIFICADA E INFALÍVEL ---
+    # Sempre zera as flags de quem pular, independente de ser "ciclo completo" ou não
+    # Isso garante que "Pular" seja apenas para ESTA VEZ.
+    
     next_idx = find_next_holder_index(current_index, queue, skips)
     
-    should_reset_flags = False
-
-    # --- LÓGICA DE CORREÇÃO PARA "TODOS PULANDO" ---
-    if (next_idx != -1 and queue[next_idx] == current_holder) and len(queue) > 1:
-        should_reset_flags = True
-
-    if next_idx != -1:
+    # Se não achou ninguém (todos pulando), força o reset e pega o próximo
+    if next_idx == -1 or (next_idx != -1 and queue[next_idx] == current_holder and len(queue) > 1):
+        # Reseta tudo
+        st.session_state.skip_flags = {c: False for c in CONSULTORES}
+        skips = st.session_state.skip_flags
+        # Pega o próximo da fila (agora sem pulos)
+        next_idx = find_next_holder_index(current_index, queue, skips)
+        st.toast("Ciclo resetado automaticamente.", icon="🔄")
+    
+    # AGORA A MÁGICA: Se o bastão vai rodar, limpamos TUDO.
+    if next_idx != -1 and queue[next_idx] != current_holder:
+        # Limpa flags de todos. Assim ninguém fica "preso" no pulo.
+        st.session_state.skip_flags = {c: False for c in CONSULTORES}
+        
         next_holder = queue[next_idx]
         duration = datetime.now() - (st.session_state.bastao_start_time or datetime.now())
-        
         log_status_change(current_holder, 'Bastão', '', duration)
         st.session_state.status_texto[current_holder] = '' 
-        
         log_status_change(next_holder, st.session_state.status_texto.get(next_holder, ''), 'Bastão', timedelta(0))
         st.session_state.status_texto[next_holder] = 'Bastão'
-        
         st.session_state.bastao_start_time = datetime.now()
-        st.session_state.skip_flags[next_holder] = False 
-        
         st.session_state.bastao_counts[current_holder] = st.session_state.bastao_counts.get(current_holder, 0) + 1
-        
         st.session_state.play_sound = True 
         st.session_state.rotation_gif_start_time = datetime.now()
-        
-        # --- APLICA O RESET SE NECESSÁRIO ---
-        if should_reset_flags:
-            print("Ciclo bloqueado por pulos. Resetando flags de todos.")
-            for c in queue:
-                st.session_state.skip_flags[c] = False
-            st.toast("Todos pularam! O bastão retornou para você e a fila foi reiniciada.", icon="🔄")
-        
         save_state()
     else:
         st.warning('Não há próximo(a) consultor(a) elegível na fila no momento.')
@@ -870,20 +722,75 @@ def toggle_skip():
     selected = st.session_state.consultor_selectbox
     st.session_state.gif_warning = False; st.session_state.rotation_gif_start_time = None
     st.session_state.lunch_warning_info = None 
-
     if not selected or selected == 'Selecione um nome': st.warning('Selecione um(a) consultor(a).'); return
     if not st.session_state.get(f'check_{selected}'): st.warning(f'{selected} não está disponível para marcar/desmarcar.'); return
-
     current_skip_status = st.session_state.skip_flags.get(selected, False)
     st.session_state.skip_flags[selected] = not current_skip_status
-
     current_holder = next((c for c, s in st.session_state.status_texto.items() if s == 'Bastão'), None)
     if selected == current_holder and st.session_state.skip_flags[selected]:
         save_state() 
         rotate_bastao() 
         return 
-
     save_state() 
+
+def manual_rerun():
+    st.session_state.gif_warning = False; st.session_state.rotation_gif_start_time = None
+    st.session_state.lunch_warning_info = None 
+    st.rerun() 
+    
+def on_auxilio_change():
+    save_state()
+
+def handle_sessao_submission(consultor_sel, camara_sel, data_obj):
+    if not data_obj:
+        st.error("Por favor, selecione uma data.")
+        return False
+        
+    data_formatada = data_obj.strftime("%d/%m/%Y")
+    data_nome_arquivo = data_obj.strftime("%d-%m-%Y")
+    email_setor = CAMARAS_DICT.get(camara_sel, "")
+    
+    nome_consultor_txt = consultor_sel if consultor_sel and consultor_sel != "Selecione um nome" else "[NOME DO(A) CONSULTOR(A)]"
+    texto_mensagem = (
+        f"Prezada equipe do {camara_sel},\n\n"
+        f"Meu nome é {nome_consultor_txt}, sou assistente de processos judiciais da CESUPE/TJMG e serei o(a) responsável pelo acompanhamento técnico da sessão de julgamento agendada para o dia {data_formatada}.\n\n"
+        "Com o objetivo de agilizar o atendimento e a verificação de eventuais demandas, encaminharei um formulário em HTML para preenchimento de algumas informações prévias. As respostas retornarão diretamente para mim, permitindo a análise antecipada da situação e, sempre que possível, a definição prévia da orientação ou solução a ser adotada. O preenchimento não é obrigatório, mas contribuirá para tornar o suporte mais eficaz.\n\n"
+        "Ressalto que continuamos disponíveis para sanar quaisquer dúvidas por meio do nosso suporte. Caso eu esteja indisponível no momento do contato, retornarei o mais breve possível.\n\n"
+        "Após a realização da sessão, o suporte técnico voltará a ser prestado de forma rotineira pelo nosso setor. Havendo dúvidas ou necessidade de suporte, entre em contato conosco pelo telefone **3232-2640**.\n\n"
+        "Permaneço à disposição e agradeço a colaboração.\n\n"
+        "Atenciosamente,\n"
+        f"{nome_consultor_txt}\n"
+        "Assistente de Processos Judiciais – CESUPE/TJMG\n\n"
+        f"Email do setor: {email_setor}"
+    )
+
+    success = send_sessao_to_chat(consultor_sel, texto_mensagem)
+    
+    if success:
+        st.session_state.last_reg_status = "success_sessao"
+        html_content = gerar_html_checklist(consultor_sel, camara_sel, data_formatada)
+        st.session_state.html_content_cache = html_content
+        st.session_state.html_download_ready = True
+        st.session_state.html_filename = f"Checklist_{data_nome_arquivo}.html"
+        return True
+    else:
+        st.session_state.last_reg_status = "error_sessao"
+        st.session_state.html_download_ready = False
+        return False
+
+def set_chamado_step(step_num):
+    st.session_state.chamado_guide_step = step_num
+
+def handle_chamado_submission():
+    consultor = st.session_state.consultor_selectbox
+    texto_chamado = st.session_state.get("chamado_textarea", "")
+    success = send_chamado_to_chat(consultor, texto_chamado)
+    if success:
+        st.session_state.last_reg_status = "success_chamado" 
+        st.session_state.chamado_guide_step = 0
+        st.session_state.chamado_textarea = ""
+    else:
+        st.session_state.last_reg_status = "error_chamado"
 
 def update_status(status_text, change_to_available): 
     selected = st.session_state.consultor_selectbox
@@ -909,7 +816,6 @@ def update_status(status_text, change_to_available):
         total_ativos = num_na_fila + num_atividade
         num_almoco = sum(1 for s in all_statuses.values() if s == 'Almoço')
         limite_almoco = total_ativos / 2.0
-        
         if total_ativos > 0 and num_almoco >= limite_almoco:
             st.session_state.lunch_warning_info = {
                 'consultor': selected,
@@ -920,66 +826,22 @@ def update_status(status_text, change_to_available):
             return 
             
     st.session_state.lunch_warning_info = None
-
     st.session_state[f'check_{selected}'] = False 
     was_holder = next((True for c, s in st.session_state.status_texto.items() if s == 'Bastão' and c == selected), False)
     old_status = st.session_state.status_texto.get(selected, '') or ('Bastão' if was_holder else 'Disponível')
     duration = datetime.now() - st.session_state.current_status_starts.get(selected, datetime.now())
-    
     log_status_change(selected, old_status, status_text, duration)
     st.session_state.status_texto[selected] = status_text 
-
     if selected in st.session_state.bastao_queue: st.session_state.bastao_queue.remove(selected)
     st.session_state.skip_flags.pop(selected, None)
-
     if status_text == 'Saída rápida':
         if selected not in st.session_state.priority_return_queue: st.session_state.priority_return_queue.append(selected)
     elif selected in st.session_state.priority_return_queue: st.session_state.priority_return_queue.remove(selected)
-
     baton_changed = False
     if was_holder: 
         baton_changed = check_and_assume_baton() 
-    
     if not baton_changed: 
         save_state() 
-
-def manual_rerun():
-    st.session_state.gif_warning = False; st.session_state.rotation_gif_start_time = None
-    st.session_state.lunch_warning_info = None 
-    st.rerun() 
-    
-def on_auxilio_change():
-    save_state()
-
-def handle_sessao_submission():
-    consultor = st.session_state.consultor_selectbox
-    texto_final = st.session_state.get("sessao_msg_preview", "")
-    
-    camara = st.session_state.get('sessao_camara_select', 'Não informada')
-    data_obj = st.session_state.get('sessao_data_input')
-    data_formatada = data_obj.strftime("%d/%m/%Y") if data_obj else 'Não informada'
-    data_nome_arquivo = data_obj.strftime("%d-%m-%Y") if data_obj else 'SemData'
-    
-    # Envia a mensagem de texto da sessão
-    success = send_sessao_to_chat(consultor, texto_final)
-    
-    if success:
-        st.session_state.last_reg_status = "success_sessao"
-        st.session_state.sessao_msg_preview = ""
-        
-        # Gera HTML e prepara download
-        html_content = gerar_html_checklist(consultor, camara, data_formatada)
-        st.session_state.html_content_cache = html_content
-        st.session_state.html_download_ready = True
-        st.session_state.html_filename = f"Checklist_{data_nome_arquivo}.html"
-        
-        st.session_state.registro_tipo_selecao = None
-    else:
-        st.session_state.last_reg_status = "error_sessao"
-        st.session_state.html_download_ready = False
-
-def set_chamado_step(step_num):
-    st.session_state.chamado_guide_step = step_num
 
 # ============================================
 # 4. EXECUÇÃO PRINCIPAL DO STREAMLIT APP
@@ -990,7 +852,6 @@ init_session_state()
 
 st.components.v1.html("<script>window.scrollTo(0, 0);</script>", height=0)
 
-# Renderiza o efeito de neve
 render_snow_effect()
 
 st.markdown(
@@ -1080,13 +941,10 @@ if proximo_index != -1:
 # --- Coluna Principal ---
 with col_principal:
     st.header("Responsável pelo Bastão")
-    
-    # --- VISUAL DO RESPONSÁVEL COM TARJA E GIF (TEMA VERMELHO) ---
     if responsavel:
-        bg_color = "#FFEBEE" # Vermelho claro
-        border_color = "#D42426" # Vermelho vibrante
-        text_color = "#8B0000" # Vermelho escuro
-        
+        bg_color = "#FFEBEE" 
+        border_color = "#D42426" 
+        text_color = "#8B0000" 
         st.markdown(f"""
         <div style="
             background-color: {bg_color}; 
@@ -1106,13 +964,11 @@ with col_principal:
             </div>
         </div>
         """, unsafe_allow_html=True)
-        
         duration = timedelta()
         if st.session_state.bastao_start_time:
              try: duration = datetime.now() - st.session_state.bastao_start_time
              except: pass
         st.caption(f"⏱️ Tempo com o bastão: **{format_time_duration(duration)}**")
-        
     else: 
         st.markdown('<h2>(Ninguém com o bastão)</h2>', unsafe_allow_html=True)
     st.markdown("###")
@@ -1127,7 +983,6 @@ with col_principal:
         elif queue and all(skips.get(c, False) or not st.session_state.get(f'check_{c}') for c in queue) : st.markdown('*Todos disponíveis estão marcados para pular...*')
         else: st.markdown('*Ninguém elegível na fila.*')
     elif not restante and proximo: st.markdown("&nbsp;")
-
 
     skipped_consultants = [c for c, is_skipped in skips.items() if is_skipped and st.session_state.get(f'check_{c}')]
     if skipped_consultants:
@@ -1149,24 +1004,31 @@ with col_principal:
     st.selectbox('Selecione:', options=['Selecione um nome'] + CONSULTORES, key='consultor_selectbox', label_visibility='collapsed')
     st.markdown("#### "); st.markdown("**Ações:**")
     
-    # --- MENUS DE AÇÃO (COLUNAS CORRIGIDAS) ---
     if 'show_activity_menu' not in st.session_state:
         st.session_state.show_activity_menu = False
     
     if 'show_sessao_dialog' not in st.session_state:
         st.session_state.show_sessao_dialog = False
+        
+    if 'show_sessao_eproc_dialog' not in st.session_state:
+        st.session_state.show_sessao_eproc_dialog = False
 
     def open_activity_menu():
         st.session_state.show_activity_menu = True
         st.session_state.show_sessao_dialog = False
+        st.session_state.show_sessao_eproc_dialog = False
         
     def open_sessao_dialog():
         st.session_state.show_sessao_dialog = True
         st.session_state.show_activity_menu = False
+        st.session_state.show_sessao_eproc_dialog = False
     
-    # 7 COLUNAS AGORA
+    def open_sessao_eproc_dialog():
+        st.session_state.show_sessao_eproc_dialog = True
+        st.session_state.show_activity_menu = False
+        st.session_state.show_sessao_dialog = False
+    
     c1, c2, c3, c4, c5, c6, c7 = st.columns(7) 
-    
     c1.button('🎯 Passar', on_click=rotate_bastao, use_container_width=True, help='Passa o bastão.')
     c2.button('⏭️ Pular', on_click=toggle_skip, use_container_width=True, help='Pular vez.')
     c3.button('📋 Atividades', on_click=open_activity_menu, use_container_width=True)
@@ -1175,45 +1037,39 @@ with col_principal:
     c6.button('🎙️ Sessão', on_click=open_sessao_dialog, use_container_width=True)
     c7.button('🚶 Saída rápida', on_click=update_status, args=('Saída rápida', False,), use_container_width=True)
     
-    # --- CONTAINER DO MENU DE ATIVIDADES ---
+    # --- MENUS EXPANDIDOS ---
+    
+    # 1. Atividades
     if st.session_state.show_activity_menu:
         with st.container(border=True):
             st.markdown("### Selecione a Atividade")
-            # MUDANÇA AQUI: MULTISELECT
             atividades_escolhidas = st.multiselect("Tipo:", OPCOES_ATIVIDADES_STATUS)
-            
             texto_extra = ""
             if "Outros" in atividades_escolhidas:
                 texto_extra = st.text_input("Descreva a atividade 'Outros':", placeholder="Ex: Ajuste técnico...")
-            
             col_confirm_1, col_confirm_2 = st.columns(2)
             with col_confirm_1:
                 if st.button("Confirmar Atividade", type="primary", use_container_width=True):
                     if atividades_escolhidas:
-                        # Concatena as escolhas
                         str_atividades = ", ".join(atividades_escolhidas)
                         status_final = f"Atividade: {str_atividades}"
-                        
                         if "Outros" in atividades_escolhidas and texto_extra:
                             status_final += f" - {texto_extra}"
-                        
                         update_status(status_final, False)
                         st.session_state.show_activity_menu = False 
                         st.rerun()
                     else:
                         st.warning("Selecione pelo menos uma atividade.")
-            
             with col_confirm_2:
                 if st.button("Cancelar", use_container_width=True, key='cancel_act'):
                     st.session_state.show_activity_menu = False
                     st.rerun()
 
-    # --- CONTAINER DO MENU DE SESSÃO (NOVO) ---
+    # 2. Sessão (Status Apenas)
     if st.session_state.show_sessao_dialog:
         with st.container(border=True):
-            st.markdown("### Informar Sessão")
+            st.markdown("### Informar Sessão (Status)")
             sessao_input = st.text_input("Qual sessão?", placeholder="Ex: 1ª Câmara Cível")
-            
             col_sess_1, col_sess_2 = st.columns(2)
             with col_sess_1:
                 if st.button("Confirmar Sessão", type="primary", use_container_width=True):
@@ -1224,7 +1080,6 @@ with col_principal:
                         st.rerun()
                     else:
                         st.warning("Digite o nome da sessão.")
-            
             with col_sess_2:
                 if st.button("Cancelar", use_container_width=True, key='cancel_sess'):
                     st.session_state.show_sessao_dialog = False
@@ -1233,160 +1088,109 @@ with col_principal:
     st.markdown("####")
     st.button('🔄 Atualizar (Manual)', on_click=manual_rerun, use_container_width=True)
     
-    # --- SEÇÃO "REGISTROS" REMOVIDA DAQUI ---
-    
-    # --- Bloco Padrão Abertura de Chamados (Mantido) ---
     st.markdown("---")
+    
+    # --- NOVA SEÇÃO: SESSÃO EPROC (HTML) ---
+    st.header("Gerador de Checklist (Sessão Eproc)")
+    
+    if st.session_state.last_reg_status == "success_sessao":
+        st.success("Registro de Sessão enviado com sucesso!")
+        if st.session_state.get('html_download_ready') and st.session_state.get('html_content_cache'):
+            filename = st.session_state.get('html_filename', 'Checklist_Sessao.html')
+            st.download_button(label=f"⬇️ Baixar Formulário HTML ({filename})", data=st.session_state.html_content_cache, file_name=filename, mime="text/html")
+        if st.button("Limpar Mensagem"):
+            st.session_state.last_reg_status = None
+            st.rerun()
+    elif st.session_state.last_reg_status == "error_sessao":
+        st.error("Erro ao enviar registro de sessão. Verifique se preencheu a câmara e a data.")
+        st.session_state.last_reg_status = None
+
+    if st.button("Abrir Gerador de Checklist", on_click=open_sessao_eproc_dialog, use_container_width=True):
+        pass
+
+    if st.session_state.show_sessao_eproc_dialog:
+        with st.container(border=True):
+            st.markdown("### Gerar HTML e Notificar")
+            data_eproc = st.date_input("Data da Sessão:", format="DD/MM/YYYY", key='sessao_data_input')
+            camara_eproc = st.selectbox("Selecione a Câmara:", CAMARAS_OPCOES, index=None, key='sessao_camara_select')
+            
+            c_eproc1, c_eproc2 = st.columns(2)
+            with c_eproc1:
+                if st.button("Gerar e Enviar HTML", type="primary", use_container_width=True):
+                    consultor = st.session_state.consultor_selectbox
+                    if consultor and consultor != 'Selecione um nome':
+                        if handle_sessao_submission(consultor, camara_eproc, data_eproc):
+                            st.session_state.show_sessao_eproc_dialog = False
+                            st.rerun()
+                    else:
+                        st.warning("Selecione um consultor no menu superior primeiro.")
+            with c_eproc2:
+                if st.button("Fechar", use_container_width=True):
+                    st.session_state.show_sessao_eproc_dialog = False
+                    st.rerun()
+
+    st.markdown("---")
+
+    # Chamados
     st.header("Padrão abertura de chamados / jiras")
-
     guide_step = st.session_state.get('chamado_guide_step', 0)
-
     if guide_step == 0:
         st.button("Gerar prévia", on_click=set_chamado_step, args=(1,), use_container_width=True)
     else:
         with st.container(border=True):
             if guide_step == 1:
                 st.subheader("📄 Resumo e Passo 1: Testes Iniciais")
-                st.markdown("""
-                O processo de abertura de chamados segue uma padronização dividida em três etapas principais:
-                
-                **PASSO 1: Testes Iniciais**
-                
-                Antes de abrir o chamado, o consultor(a) deve primeiro realizar os procedimentos de suporte e testes necessários para **verificar e confirmar o problema** que foi relatado pelo usuário.
-                """)
+                st.markdown("O processo de abertura de chamados segue uma padronização dividida em três etapas principais:\n**PASSO 1: Testes Iniciais**\nAntes de abrir o chamado, o consultor(a) deve primeiro realizar os procedimentos de suporte e testes necessários para **verificar e confirmar o problema** que foi relatado pelo usuário.")
                 st.button("Próximo (Passo 2) ➡️", on_click=set_chamado_step, args=(2,))
-            
             elif guide_step == 2:
                 st.subheader("PASSO 2: Checklist de Abertura e Descrição")
-                st.markdown("""
-                Ao abrir o chamado, é obrigatório preencher um checklist com informações detalhadas para descrever a situação.
-                
-                **1. Dados do Usuário Envolvido**
-                * Nome completo
-                * Matrícula
-                * Tipo/perfil do usuário
-                * Número de telefone (celular ou ramal com prefixo)
-                
-                **2. Dados do Processo (Se aplicável)**
-                * Número(s) completo(s) do(s) processo(s) afetados
-                * Classe do(s) processo(s) afetados
-                
-                **3. Descrição do Erro**
-                * Descrever o **passo a passo exato** que levou ao erro.
-                * Indicar a data e o horário em que o erro ocorreu e qual a sua frequência (incidência).
-                
-                **4. Prints de Tela ou Vídeo**
-                * Anexar imagens do erro apresentado nos sistemas (SIAP, THEMIS, JPE, EPROC).
-                * Especificamente para o **THEMIS**, incluir um print da tela do **TOOLS** mostrando o log de erro.
-                
-                **5. Descrição dos Testes Realizados**
-                * Descrever todos os testes que foram feitos (ex: teste em outra máquina, com outro usuário, em outro processo).
-                * Informar se foi tentada alguma alternativa para contornar o erro e qual foi o resultado dessa tentativa.
-                
-                **6. Soluções de Contorno (Se houver)**
-                * Descrever qual solução de contorno foi utilizada para resolver o problema temporariamente.
-                
-                **7. Identificação do(a) Consultor(a)**
-                * Inserir a assinatura e identificação do(a) consultor(a).
-                """)
+                st.markdown("Ao abrir o chamado, é obrigatório preencher um checklist com informações detalhadas para descrever a situação.\n**1. Dados do Usuário Envolvido**\n* Nome completo, Matrícula, Tipo/perfil, Telefone.\n**2. Dados do Processo**\n* Número completo, Classe.\n**3. Descrição do Erro**\n* Passo a passo, Data/Hora, Frequência.\n**4. Prints/Vídeo**\n* Imagens do erro.\n**5. Testes Realizados**\n* Testes feitos e resultados.\n**6. Soluções de Contorno**\n**7. Identificação do Consultor**")
                 st.button("Próximo (Passo 3) ➡️", on_click=set_chamado_step, args=(3,))
-                
             elif guide_step == 3:
                 st.subheader("PASSO 3: Registrar e Informar o Usuário por E-mail")
-                st.markdown("""
-                Após a abertura do chamado, o consultor(a) deve enviar um e-mail ao usuário (serventuário) informando que:
-                
-                * A questão é de competência do setor de Informática do TJMG.
-                * Um chamado ($n^{\circ}$ CH) foi aberto junto ao referido departamento.
-                * O departamento de informática realizará as verificações e tomará as providências necessárias.
-                * O usuário deve aguardar, e o consultor(a) entrará em contato assim que receber um feedback do departamento com as orientações.
-                """)
+                st.markdown("Após a abertura do chamado, envie e-mail ao usuário informando que a questão é da Informática, o número do chamado e que ele deve aguardar.")
                 st.button("Próximo (Observações) ➡️", on_click=set_chamado_step, args=(4,))
-                
             elif guide_step == 4:
                 st.subheader("Observações Gerais Importantes")
-                st.markdown("""
-                * **Comunicação:** O envio de qualquer informação ou documento para setores ou usuários deve ser feito apenas para o **e-mail institucional oficial**.
-                * **Atualização:** A atualização das informações sobre o andamento deve ser feita no **IN**.
-                * **Controle:** Cada consultor(a) é **responsável por ter seu próprio controle** dos chamados que abriu, atualizá-los quando necessário e orientar o usuário.
-                """)
+                st.markdown("* Comunicação via e-mail institucional.\n* Atualização no IN.\n* Controle próprio dos chamados.")
                 st.button("Entendi! Abrir campo de digitação ➡️", on_click=set_chamado_step, args=(5,))
-                
             elif guide_step == 5:
                 st.subheader("Campo de Digitação do Chamado")
-                st.markdown("Utilize o campo abaixo para rascunhar seu chamado, seguindo o padrão lido. Você pode copiar e colar o texto daqui.")
-                st.text_area(
-                    "Rascunho do Chamado:", 
-                    height=300, 
-                    key="chamado_textarea", 
-                    label_visibility="collapsed"
-                )
-                
+                st.text_area("Rascunho do Chamado:", height=300, key="chamado_textarea", label_visibility="collapsed")
                 col_btn_1, col_btn_2 = st.columns(2)
                 with col_btn_1:
-                    st.button(
-                        "Enviar Rascunho", 
-                        on_click=handle_chamado_submission, 
-                        use_container_width=True,
-                        type="primary"
-                    )
+                    st.button("Enviar Rascunho", on_click=handle_chamado_submission, use_container_width=True, type="primary")
                 with col_btn_2:
-                    st.button(
-                        "Cancelar", 
-                        on_click=set_chamado_step, 
-                        args=(0,), 
-                        use_container_width=True
-                    )
+                    st.button("Cancelar", on_click=set_chamado_step, args=(0,), use_container_width=True)
 
-
-# --- Coluna Disponibilidade ---
 with col_disponibilidade:
     st.markdown("###")
-    
-    st.toggle(
-        "Auxílio HP/Emails/Whatsapp", 
-        key='auxilio_ativo', 
-        on_change=on_auxilio_change
-    )
-    
+    st.toggle("Auxílio HP/Emails/Whatsapp", key='auxilio_ativo', on_change=on_auxilio_change)
     if st.session_state.get('auxilio_ativo'):
         st.warning("HP/Emails/Whatsapp irão para bastão")
         st.image(GIF_URL_NEDRY, width=300)
-    
     st.markdown("---")
-
     st.header('Status dos(as) Consultores(as)')
     st.markdown('Marque/Desmarque para entrar/sair.')
     
-    # ----------------------------------------------------
-    # LISTAS DO PAINEL DIREITO (ORGANIZADAS)
-    # ----------------------------------------------------
     ui_lists = {'fila': [], 'almoco': [], 'saida': [], 'ausente': [], 'atividade_especifica': [], 'sessao_especifica': [], 'indisponivel': []} 
-    
     for nome in CONSULTORES:
         is_checked = st.session_state.get(f'check_{nome}', False)
         status = st.session_state.status_texto.get(nome, 'Indisponível')
-        
         if status == 'Bastão': ui_lists['fila'].insert(0, nome)
         elif status == '': ui_lists['fila'].append(nome)
         elif status == 'Almoço': ui_lists['almoco'].append(nome)
         elif status == 'Ausente': ui_lists['ausente'].append(nome)
         elif status == 'Saída rápida': ui_lists['saida'].append(nome)
-        
-        # SESSÃO
         elif status.startswith('Sessão'):
-            # Remove "Sessão: " para exibir só o nome da câmara
             clean_status = status.replace('Sessão: ', '')
             ui_lists['sessao_especifica'].append((nome, clean_status))
-
-        # ATIVIDADES (Demanda)
         elif status.startswith('Atividade') or status == 'Atendimento': 
             if status == 'Atendimento':
                 ui_lists['atividade_especifica'].append((nome, "Atendimento"))
             else:
                 clean_status = status.replace('Atividade: ', '')
                 ui_lists['atividade_especifica'].append((nome, clean_status))
-                
         elif status == 'Indisponível': ui_lists['indisponivel'].append(nome)
         else: ui_lists['indisponivel'].append(nome)
 
@@ -1397,17 +1201,13 @@ with col_disponibilidade:
         for nome in render_order:
             col_nome, col_check = st.columns([0.8, 0.2])
             key = f'check_{nome}'
-            
             col_check.checkbox(' ', key=key, on_change=update_queue, args=(nome,), label_visibility='collapsed')
-            
             skip_flag = skips.get(nome, False)
             if nome == responsavel:
-                # TAG VERMELHA PARA O RESPONSÁVEL
                 display = f'<span style="background-color: #D42426; color: white; padding: 2px 6px; border-radius: 5px; font-weight: bold;">🔥 {nome}</span>'
             elif skip_flag:
                 display = f'**{nome}** :orange-background[Pulando ⏭️]'
             else:
-                # TAG VERMELHA PARA AGUARDANDO
                 display = f'**{nome}** :red-background[Aguardando]'
             col_nome.markdown(display, unsafe_allow_html=True)
     st.markdown('---')
@@ -1423,7 +1223,6 @@ with col_disponibilidade:
                 col_nome.markdown(f'**{nome}** :{tag_color}-background[{title}]', unsafe_allow_html=True)
         st.markdown('---')
 
-    # 1. EM DEMANDA (Antigo Atividades/Atendimento)
     st.subheader(f'📋 Em Demanda ({len(ui_lists["atividade_especifica"])})')
     if not ui_lists['atividade_especifica']: 
         st.markdown('_Ninguém em demanda._')
@@ -1434,10 +1233,8 @@ with col_disponibilidade:
             col_nome.markdown(f'**{nome}** :orange-background[{status_desc}]', unsafe_allow_html=True)
     st.markdown('---')
 
-    # 2. ALMOÇO - Agora com tag vermelha
     render_section('Almoço', '🍽️', ui_lists['almoco'], 'red')
 
-    # 3. SESSÃO
     st.subheader(f'🎙️ Sessão ({len(ui_lists["sessao_especifica"])})')
     if not ui_lists['sessao_especifica']: 
         st.markdown('_Ninguém em sessão._')
@@ -1448,19 +1245,12 @@ with col_disponibilidade:
             col_nome.markdown(f'**{nome}** :green-background[{status_desc}]', unsafe_allow_html=True)
     st.markdown('---')
 
-    # 4. SAÍDA RÁPIDA
     render_section('Saída rápida', '🚶', ui_lists['saida'], 'red')
-
-    # 5. AUSENTES
     render_section('Ausente', '👤', ui_lists['ausente'], 'violet') 
-    
-    # 6. INDISPONÍVEL
     render_section('Indisponível', '❌', ui_lists['indisponivel'], 'grey')
 
-# --- Lógica de Relatório Diário ---
 now = datetime.now()
 last_run_date = st.session_state.report_last_run_date.date() if isinstance(st.session_state.report_last_run_date, datetime) else datetime.min.date()
-
 if now.hour >= 20 and now.date() > last_run_date:
     print(f"TRIGGER: Enviando relatório diário. Agora: {now}, Última Execução: {st.session_state.report_last_run_date}")
     send_daily_report()
