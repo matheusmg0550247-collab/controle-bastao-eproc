@@ -14,7 +14,7 @@ import threading
 
 # --- Constantes de Consultores ---
 CONSULTORES = sorted([
-   "Alex Paulo da Silva",
+    "Alex Paulo da Silva",
     "Dirceu Gonçalves Siqueira Neto",
     "Douglas de Souza Gonçalves",
     "Farley Leandro de Oliveira Juliano", 
@@ -239,6 +239,7 @@ def send_atendimento_to_chat(consultor, data, usuario, nome_setor, sistema, desc
     return True
 
 # --- NOVA FUNÇÃO PARA ENVIAR NOTIFICAÇÃO DE "ATIVIDADE" (NO MENU SUPERIOR) ---
+# (Essa função ficou no código mas não será mais chamada no botão de atividade, conforme pedido)
 def send_atividade_status_to_chat(consultor, status_msg):
     if not GOOGLE_CHAT_WEBHOOK_REGISTRO: return False
     
@@ -1198,13 +1199,8 @@ with col_principal:
                         
                         update_status(status_final, False)
                         
-                        # Envia notificação de atividade para o webhook
-                        msg_atividade = (f"**📌 Atualização de Status (Atividade)**\n\n"
-                                         f"👤 **Consultor:** {st.session_state.consultor_selectbox}\n"
-                                         f"📋 **Atividades:** {str_atividades}\n"
-                                         f"ℹ️ **Detalhes:** {texto_extra if texto_extra else 'N/A'}")
-                        chat_msg = {"text": msg_atividade}
-                        threading.Thread(target=_send_webhook_thread, args=(GOOGLE_CHAT_WEBHOOK_REGISTRO, chat_msg)).start()
+                        # (O envio de Webhook foi removido daqui conforme solicitado)
+                        # Apenas atualiza o status e fecha o menu
 
                         st.session_state.active_view = None # Fecha após confirmar
                         st.rerun()
