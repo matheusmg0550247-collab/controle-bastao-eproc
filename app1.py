@@ -14,7 +14,7 @@ import threading
 
 # --- Constantes de Consultores ---
 CONSULTORES = sorted([
-       "Alex Paulo da Silva",
+   "Alex Paulo da Silva",
     "Dirceu Gonçalves Siqueira Neto",
     "Douglas de Souza Gonçalves",
     "Farley Leandro de Oliveira Juliano", 
@@ -58,6 +58,7 @@ GOOGLE_CHAT_WEBHOOK_REGISTRO = "https://chat.googleapis.com/v1/spaces/AAQAVvsU4L
 GOOGLE_CHAT_WEBHOOK_CHAMADO = "https://chat.googleapis.com/v1/spaces/AAQAPPWlpW8/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=jMg2PkqtpIe3JbG_SZG_ZhcfuQQII9RXM0rZQienUZk"
 GOOGLE_CHAT_WEBHOOK_SESSAO = "https://chat.googleapis.com/v1/spaces/AAQAWs1zqNM/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=hIxKd9f35kKdJqWUNjttzRBfCsxomK0OJ3AkH9DJmxY"
 GOOGLE_CHAT_WEBHOOK_CHECKLIST_HTML = "https://chat.googleapis.com/v1/spaces/AAQAXbwpQHY/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=7AQaoGHiWIfv3eczQzVZ-fbQdBqSBOh1CyQ854o1f7k"
+GOOGLE_CHAT_WEBHOOK_HORAS_EXTRAS = "https://chat.googleapis.com/v1/spaces/AAQA0V8TAhs/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=Zl7KMv0PLrm5c7IMZZdaclfYoc-je9ilDDAlDfqDMAU"
 
 
 # Listas para o formulário de atendimento
@@ -124,7 +125,7 @@ def save_state():
         global_data['report_last_run_date'] = st.session_state.report_last_run_date
         global_data['rotation_gif_start_time'] = st.session_state.get('rotation_gif_start_time')
         global_data['lunch_warning_info'] = st.session_state.get('lunch_warning_info')
-        global_data['auxilio_ativo'] = st.session_state.get('auxilio_ativo', False)
+        global_data['auxilio_ativo'] = st.session_state.get('auxilio_ativo', False) 
         global_data['daily_logs'] = json.loads(json.dumps(st.session_state.daily_logs, default=date_serializer))
     except Exception as e: 
         print(f'Erro ao salvar estado GLOBAL: {e}')
@@ -615,13 +616,8 @@ def init_session_state():
         'html_download_ready': False, 
         'html_content_cache': "", 
         'auxilio_ativo': False,
-        'show_activity_menu': False,
-        'show_sessao_dialog': False,
-        'show_sessao_eproc_dialog': False,
-        'show_horas_extras_dialog': False,
-        'show_atendimento_dialog': False,
+        'active_view': None, # ESTADO UNIFICADO PARA CONTROLAR A TELA
         'last_jira_number': "",
-        'active_tool': None # Para controlar qual ferramenta está aberta
     }
     for key, default in defaults.items():
         if key not in st.session_state:
@@ -951,7 +947,7 @@ def handle_horas_extras_submission(consultor_sel, data, inicio, tempo, motivo):
     
     if send_horas_extras_to_chat(consultor_sel, data, inicio, tempo, motivo):
         st.success("Horas extras registradas com sucesso!")
-        st.session_state.active_tool = None # Fecha a aba
+        st.session_state.active_view = None # Fecha a aba
         time.sleep(1)
         st.rerun()
     else:
@@ -965,7 +961,7 @@ def handle_atendimento_submission(consultor, data, usuario, nome_setor, sistema,
 
     if send_atendimento_to_chat(consultor, data, usuario, nome_setor, sistema, descricao, canal, desfecho, jira_opcional):
         st.success("Atendimento registrado com sucesso!")
-        st.session_state.active_tool = None # Fecha a aba
+        st.session_state.active_view = None # Fecha a aba
         time.sleep(1)
         st.rerun()
     else:
@@ -1154,49 +1150,88 @@ with col_principal:
     st.selectbox('Selecione:', options=['Selecione um nome'] + CONSULTORES, key='consultor_selectbox', label_visibility='collapsed')
     st.markdown("#### "); st.markdown("**Ações:**")
     
-    if 'show_activity_menu' not in st.session_state:
-        st.session_state.show_activity_menu = False
-    
-    def open_activity_menu():
-        st.session_state.show_activity_menu = True
-        st.session_state.active_tool = None # Fecha outras abas ao abrir atividade
-    
+    # Função CENTRALIZADA para alternar telas
+    def toggle_view(view_name):
+        # Se clicou na mesma coisa que já está aberta, fecha (toggle off)
+        if st.session_state.active_view == view_name:
+            st.session_state.active_view = None
+        else:
+            st.session_state.active_view = view_name
+            # Lógica específica para resets
+            if view_name == 'chamados':
+                st.session_state.chamado_guide_step = 1
+
     c1, c2, c3, c4, c5, c6, c7 = st.columns(7) 
     c1.button('🎯 Passar', on_click=rotate_bastao, use_container_width=True, help='Passa o bastão.')
     c2.button('⏭️ Pular', on_click=toggle_skip, use_container_width=True, help='Pular vez.')
-    c3.button('📋 Atividades', on_click=open_activity_menu, use_container_width=True)
+    
+    # BOTÃO ATIVIDADES (Chama a função centralizada)
+    c3.button('📋 Atividades', on_click=toggle_view, args=('menu_atividades',), use_container_width=True)
+    
     c4.button('🍽️ Almoço', on_click=update_status, args=('Almoço', False,), use_container_width=True)
     c5.button('👤 Ausente', on_click=update_status, args=('Ausente', False,), use_container_width=True)
     c6.button('🎙️ Sessão', on_click=lambda: update_status("Sessão", False), use_container_width=True)
     c7.button('🚶 Saída rápida', on_click=update_status, args=('Saída rápida', False,), use_container_width=True)
     
+    # -------------------------------------------------------------
+    # POSICIONAMENTO CORRIGIDO: O FORMULÁRIO DE ATIVIDADES ESTÁ AQUI
+    # (Antes do botão atualizar e antes das outras ferramentas)
+    # -------------------------------------------------------------
+    if st.session_state.active_view == 'menu_atividades':
+        with st.container(border=True):
+            st.markdown("### Selecione a Atividade")
+            atividades_escolhidas = st.multiselect("Tipo:", OPCOES_ATIVIDADES_STATUS)
+            
+            texto_extra = ""
+            if "Outros" in atividades_escolhidas:
+                texto_extra = st.text_input("Descreva a atividade 'Outros':", placeholder="Ex: Ajuste técnico...")
+            
+            col_confirm_1, col_confirm_2 = st.columns(2)
+            with col_confirm_1:
+                if st.button("Confirmar Atividade", type="primary", use_container_width=True):
+                    if atividades_escolhidas:
+                        str_atividades = ", ".join(atividades_escolhidas)
+                        status_final = f"Atividade: {str_atividades}"
+                        
+                        if "Outros" in atividades_escolhidas and texto_extra:
+                            status_final += f" - {texto_extra}"
+                        
+                        update_status(status_final, False)
+                        
+                        # Envia notificação de atividade para o webhook
+                        msg_atividade = (f"**📌 Atualização de Status (Atividade)**\n\n"
+                                         f"👤 **Consultor:** {st.session_state.consultor_selectbox}\n"
+                                         f"📋 **Atividades:** {str_atividades}\n"
+                                         f"ℹ️ **Detalhes:** {texto_extra if texto_extra else 'N/A'}")
+                        chat_msg = {"text": msg_atividade}
+                        threading.Thread(target=_send_webhook_thread, args=(GOOGLE_CHAT_WEBHOOK_REGISTRO, chat_msg)).start()
+
+                        st.session_state.active_view = None # Fecha após confirmar
+                        st.rerun()
+                    else:
+                        st.warning("Selecione pelo menos uma atividade.")
+            with col_confirm_2:
+                if st.button("Cancelar", use_container_width=True, key='cancel_act'):
+                    st.session_state.active_view = None
+                    st.rerun()
+    # -------------------------------------------------------------
+    
     st.markdown("####")
     st.button('🔄 Atualizar (Manual)', on_click=manual_rerun, use_container_width=True)
     
-    # [MODIFICAÇÃO] BOTÕES DE FERRAMENTAS AGORA AQUI EMBAIXO DO MANUAL
     st.markdown("---")
     
-    # Adicionado lógica de callback para garantir que a aba abra
-    def set_active_tool(tool_name):
-        # Se clicar no mesmo botão que já está aberto, fecha (toggle)
-        if st.session_state.active_tool == tool_name:
-            st.session_state.active_tool = None
-        else:
-            st.session_state.active_tool = tool_name
-            # Força o passo 1 se for chamados
-            if tool_name == "chamados":
-                st.session_state.chamado_guide_step = 1
-
+    # BOTÕES DE FERRAMENTAS INFERIORES
     c_tool1, c_tool2, c_tool3, c_tool4 = st.columns(4)
-    c_tool1.button("📑 Checklist", help="Gerador de Checklist Eproc", use_container_width=True, on_click=set_active_tool, args=("checklist",))
-    c_tool2.button("🆘 Chamados", help="Guia de Abertura de Chamados", use_container_width=True, on_click=set_active_tool, args=("chamados",))
-    c_tool3.button("📝 Atendimentos", help="Registrar Atendimento", use_container_width=True, on_click=set_active_tool, args=("atendimentos",))
-    c_tool4.button("⏰ H. Extras", help="Registrar Horas Extras", use_container_width=True, on_click=set_active_tool, args=("hextras",))
+    c_tool1.button("📑 Checklist", help="Gerador de Checklist Eproc", use_container_width=True, on_click=toggle_view, args=("checklist",))
+    c_tool2.button("🆘 Chamados", help="Guia de Abertura de Chamados", use_container_width=True, on_click=toggle_view, args=("chamados",))
+    c_tool3.button("📝 Atendimentos", help="Registrar Atendimento", use_container_width=True, on_click=toggle_view, args=("atendimentos",))
+    c_tool4.button("⏰ H. Extras", help="Registrar Horas Extras", use_container_width=True, on_click=toggle_view, args=("hextras",))
         
-    # --- RENDERIZAÇÃO DO CONTEÚDO DAS ABAS (MUTUAMENTE EXCLUSIVO) ---
+    # --- RENDERIZAÇÃO DAS FERRAMENTAS (FISICAMENTE ABAIXO DOS BOTÕES) ---
     
     # 1. CHECKLIST EPROC
-    if st.session_state.get('active_tool') == "checklist":
+    if st.session_state.active_view == "checklist":
         with st.container(border=True):
             st.header("Gerador de Checklist (Sessão Eproc)")
             if st.session_state.get('last_reg_status') == "success_sessao":
@@ -1217,7 +1252,7 @@ with col_principal:
                     st.warning("Selecione um consultor no menu acima primeiro.")
 
     # 2. CHAMADOS (GUIA)
-    elif st.session_state.get('active_tool') == "chamados":
+    elif st.session_state.active_view == "chamados":
         with st.container(border=True):
             st.header("Padrão abertura de chamados / jiras")
             guide_step = st.session_state.get('chamado_guide_step', 1)
@@ -1245,7 +1280,7 @@ with col_principal:
                     pass
 
     # 3. ATENDIMENTOS
-    elif st.session_state.get('active_tool') == "atendimentos":
+    elif st.session_state.active_view == "atendimentos":
         with st.container(border=True):
             st.markdown("### Registro de Atendimento")
             at_data = st.date_input("Data:", value=date.today(), format="DD/MM/YYYY", key="at_data")
@@ -1267,7 +1302,7 @@ with col_principal:
                     handle_atendimento_submission(consultor, at_data, at_usuario, at_nome_setor, at_sistema, at_descricao, at_canal, at_desfecho, at_jira)
 
     # 4. HORAS EXTRAS
-    elif st.session_state.get('active_tool') == "hextras":
+    elif st.session_state.active_view == "hextras":
         with st.container(border=True):
             st.markdown("### Registro de Horas Extras")
             he_data = st.date_input("Data:", value=date.today(), format="DD/MM/YYYY")
@@ -1282,44 +1317,6 @@ with col_principal:
                 else:
                     handle_horas_extras_submission(consultor, he_data, he_inicio, he_tempo, he_motivo)
     
-    # 1. Atividades (Menu Expandido - Original)
-    if st.session_state.show_activity_menu:
-        with st.container(border=True):
-            st.markdown("### Selecione a Atividade")
-            atividades_escolhidas = st.multiselect("Tipo:", OPCOES_ATIVIDADES_STATUS)
-            
-            texto_extra = ""
-            if "Outros" in atividades_escolhidas:
-                texto_extra = st.text_input("Descreva a atividade 'Outros':", placeholder="Ex: Ajuste técnico...")
-            
-            col_confirm_1, col_confirm_2 = st.columns(2)
-            with col_confirm_1:
-                if st.button("Confirmar Atividade", type="primary", use_container_width=True):
-                    if atividades_escolhidas:
-                        str_atividades = ", ".join(atividades_escolhidas)
-                        status_final = f"Atividade: {str_atividades}"
-                        
-                        if "Outros" in atividades_escolhidas and texto_extra:
-                            status_final += f" - {texto_extra}"
-                        
-                        update_status(status_final, False)
-                        # Envia notificação de atividade para o webhook
-                        msg_atividade = (f"**📌 Atualização de Status (Atividade)**\n\n"
-                                         f"👤 **Consultor:** {st.session_state.consultor_selectbox}\n"
-                                         f"📋 **Atividades:** {str_atividades}\n"
-                                         f"ℹ️ **Detalhes:** {texto_extra if texto_extra else 'N/A'}")
-                        chat_msg = {"text": msg_atividade}
-                        threading.Thread(target=_send_webhook_thread, args=(GOOGLE_CHAT_WEBHOOK_REGISTRO, chat_msg)).start()
-
-                        st.session_state.show_activity_menu = False 
-                        st.rerun()
-                    else:
-                        st.warning("Selecione pelo menos uma atividade.")
-            with col_confirm_2:
-                if st.button("Cancelar", use_container_width=True, key='cancel_act'):
-                    st.session_state.show_activity_menu = False
-                    st.rerun()
-
 with col_disponibilidade:
     st.markdown("###")
     st.toggle("Auxílio HP/Emails/Whatsapp", key='auxilio_ativo', on_change=on_auxilio_change)
