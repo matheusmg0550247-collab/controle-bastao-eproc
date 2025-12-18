@@ -1,12 +1,11 @@
-
 # ============================================
 # 1. IMPORTS E DEFINIÇÕES GLOBAIS
 # ============================================
 import streamlit as st
 import pandas as pd
 import requests
-import time # Importa o módulo de tempo (para o sleep)
-from datetime import datetime, timedelta, date, time as dt_time # Renomeia time para dt_time para evitar conflito
+import time 
+from datetime import datetime, timedelta, date, time as dt_time 
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
 import json 
@@ -15,7 +14,7 @@ import threading
 
 # --- Constantes de Consultores ---
 CONSULTORES = sorted([
-   "Alex Paulo da Silva",
+       "Alex Paulo da Silva",
     "Dirceu Gonçalves Siqueira Neto",
     "Douglas de Souza Gonçalves",
     "Farley Leandro de Oliveira Juliano", 
@@ -36,7 +35,6 @@ CONSULTORES = sorted([
 # --- FUNÇÃO DE CACHE GLOBAL ---
 @st.cache_resource(show_spinner=False)
 def get_global_state_cache():
-    """Inicializa e retorna o dicionário de estado GLOBAL compartilhado."""
     print("--- Inicializando o Cache de Estado GLOBAL (Executa Apenas 1x) ---")
     return {
         'status_texto': {nome: 'Indisponível' for nome in CONSULTORES},
@@ -50,7 +48,7 @@ def get_global_state_cache():
         'rotation_gif_start_time': None,
         'lunch_warning_info': None,
         'auxilio_ativo': False, 
-        'daily_logs': [] 
+        'daily_logs': []
     }
 
 # --- Constantes (Webhooks) ---
@@ -61,6 +59,12 @@ GOOGLE_CHAT_WEBHOOK_CHAMADO = "https://chat.googleapis.com/v1/spaces/AAQAPPWlpW8
 GOOGLE_CHAT_WEBHOOK_SESSAO = "https://chat.googleapis.com/v1/spaces/AAQAWs1zqNM/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=hIxKd9f35kKdJqWUNjttzRBfCsxomK0OJ3AkH9DJmxY"
 GOOGLE_CHAT_WEBHOOK_CHECKLIST_HTML = "https://chat.googleapis.com/v1/spaces/AAQAXbwpQHY/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=7AQaoGHiWIfv3eczQzVZ-fbQdBqSBOh1CyQ854o1f7k"
 
+
+# Listas para o formulário de atendimento
+REG_USUARIO_OPCOES = ["Cartório", "Gabinete", "Externo"]
+REG_SISTEMA_OPCOES = ["Conveniados", "Outros", "Eproc", "Themis", "JPE", "SIAP"]
+REG_CANAL_OPCOES = ["Presencial", "Telefone", "Email", "Whatsapp", "Outros"]
+REG_DESFECHO_OPCOES = ["Resolvido - Cesupe", "Escalonado"]
 
 # Dados das Câmaras
 CAMARAS_DICT = {
@@ -97,6 +101,9 @@ PUGNOEL_URL = "https://github.com/matheusmg0550247-collab/controle-bastao-eproc2
 # ============================================
 # 2. FUNÇÕES AUXILIARES GLOBAIS
 # ============================================
+
+def load_logs():
+    return st.session_state.daily_logs
 
 def date_serializer(obj):
     if isinstance(obj, datetime): return obj.isoformat()
@@ -186,13 +193,10 @@ def send_chat_notification_internal(consultor, status):
         return True
     return False
 
-# --- NOVA FUNÇÃO PARA HORAS EXTRAS ---
+# --- FUNÇÕES PARA OS NOVOS BOTÕES (ATENDIMENTO E HE) ---
 def send_horas_extras_to_chat(consultor, data, inicio, tempo, motivo):
-    """Envia o registro de horas extras para o chat."""
-    if not GOOGLE_CHAT_WEBHOOK_HORAS_EXTRAS:
-        return False
+    if not GOOGLE_CHAT_WEBHOOK_HORAS_EXTRAS: return False
     
-    # Formatação da data para dd/mm/aaaa
     data_formatada = data.strftime("%d/%m/%Y")
     inicio_formatado = inicio.strftime("%H:%M")
     
@@ -208,6 +212,46 @@ def send_horas_extras_to_chat(consultor, data, inicio, tempo, motivo):
     chat_message = {"text": msg}
     threading.Thread(target=_send_webhook_thread, args=(GOOGLE_CHAT_WEBHOOK_HORAS_EXTRAS, chat_message)).start()
     return True
+
+def send_atendimento_to_chat(consultor, data, usuario, nome_setor, sistema, descricao, canal, desfecho, jira_opcional=""):
+    if not GOOGLE_CHAT_WEBHOOK_REGISTRO: return False
+    
+    data_formatada = data.strftime("%d/%m/%Y")
+    
+    jira_str = f"\n🔢 **Jira:** CESUPE-{jira_opcional}" if jira_opcional else ""
+    
+    msg = (
+        f"📋 **Novo Registro de Atendimento**\n\n"
+        f"👤 **Consultor:** {consultor}\n"
+        f"📅 **Data:** {data_formatada}\n"
+        f"👥 **Usuário:** {usuario}\n"
+        f"🏢 **Nome/Setor:** {nome_setor}\n"
+        f"💻 **Sistema:** {sistema}\n"
+        f"📝 **Descrição:** {descricao}\n"
+        f"📞 **Canal:** {canal}\n"
+        f"✅ **Desfecho:** {desfecho}"
+        f"{jira_str}"
+    )
+    
+    chat_message = {"text": msg}
+    threading.Thread(target=_send_webhook_thread, args=(GOOGLE_CHAT_WEBHOOK_REGISTRO, chat_message)).start()
+    return True
+
+# --- NOVA FUNÇÃO PARA ENVIAR NOTIFICAÇÃO DE "ATIVIDADE" (NO MENU SUPERIOR) ---
+def send_atividade_status_to_chat(consultor, status_msg):
+    if not GOOGLE_CHAT_WEBHOOK_REGISTRO: return False
+    
+    msg = (
+        f"📌 **Atualização de Status (Atividade)**\n\n"
+        f"👤 **Consultor:** {consultor}\n"
+        f"📋 **Status:** {status_msg}\n"
+        f"🕒 **Horário:** {datetime.now().strftime('%H:%M')}"
+    )
+    
+    chat_message = {"text": msg}
+    threading.Thread(target=_send_webhook_thread, args=(GOOGLE_CHAT_WEBHOOK_REGISTRO, chat_message)).start()
+    return True
+
 
 def play_sound_html(): return f'<audio autoplay="true"><source src="{SOUND_URL}" type="audio/mpeg"></audio>'
 
@@ -501,6 +545,7 @@ def send_sessao_to_chat(consultor, texto_mensagem):
     return True
 
 def send_daily_report(): 
+    # load_logs agora existe e retorna st.session_state.daily_logs
     logs = load_logs() 
     bastao_counts = st.session_state.bastao_counts.copy()
     aggregated_data = {nome: {} for nome in CONSULTORES}
@@ -548,7 +593,6 @@ def send_daily_report():
     if not GOOGLE_CHAT_WEBHOOK_BACKUP: return 
 
     chat_message = {'text': report_text}
-    # Envio assíncrono para o relatório também
     threading.Thread(target=_send_webhook_thread, args=(GOOGLE_CHAT_WEBHOOK_BACKUP, chat_message)).start()
     
     st.session_state['report_last_run_date'] = datetime.now()
@@ -574,7 +618,10 @@ def init_session_state():
         'show_activity_menu': False,
         'show_sessao_dialog': False,
         'show_sessao_eproc_dialog': False,
-        'show_horas_extras_dialog': False 
+        'show_horas_extras_dialog': False,
+        'show_atendimento_dialog': False,
+        'last_jira_number': "",
+        'active_tool': None # Para controlar qual ferramenta está aberta
     }
     for key, default in defaults.items():
         if key not in st.session_state:
@@ -882,7 +929,6 @@ def update_status(status_text, change_to_available):
     old_status = st.session_state.status_texto.get(selected, '') or ('Bastão' if was_holder else 'Disponível')
     duration = datetime.now() - st.session_state.current_status_starts.get(selected, datetime.now())
     
-    # AQUI ESTÁ A CORREÇÃO DA ORDEM DE CHAMADA
     log_status_change(selected, old_status, status_text, duration)
     
     st.session_state.status_texto[selected] = status_text 
@@ -897,12 +943,33 @@ def update_status(status_text, change_to_available):
     if not baton_changed: 
         save_state() 
 
-# --- LÓGICA DE ABERTURA DO DIALOG DE HORAS EXTRAS ---
-def open_horas_extras_dialog():
-    st.session_state.show_horas_extras_dialog = True
+# Handler para Horas Extras
+def handle_horas_extras_submission(consultor_sel, data, inicio, tempo, motivo):
+    if not consultor_sel or consultor_sel == "Selecione um nome":
+        st.error("Selecione um consultor.")
+        return
+    
+    if send_horas_extras_to_chat(consultor_sel, data, inicio, tempo, motivo):
+        st.success("Horas extras registradas com sucesso!")
+        st.session_state.active_tool = None # Fecha a aba
+        time.sleep(1)
+        st.rerun()
+    else:
+        st.error("Erro ao enviar. Verifique o Webhook.")
 
-# --- MODIFICAÇÃO AQUI: LÓGICA IMPERATIVA NO LUGAR DE CALLBACK ---
-# A lógica agora ficará diretamente no botão na seção principal
+# Handler para Atendimento
+def handle_atendimento_submission(consultor, data, usuario, nome_setor, sistema, descricao, canal, desfecho, jira_opcional=""):
+    if not consultor or consultor == "Selecione um nome":
+        st.error("Selecione um consultor.")
+        return
+
+    if send_atendimento_to_chat(consultor, data, usuario, nome_setor, sistema, descricao, canal, desfecho, jira_opcional):
+        st.success("Atendimento registrado com sucesso!")
+        st.session_state.active_tool = None # Fecha a aba
+        time.sleep(1)
+        st.rerun()
+    else:
+        st.error("Erro ao enviar. Verifique o Webhook.")
 
 # ============================================
 # 4. EXECUÇÃO PRINCIPAL DO STREAMLIT APP
@@ -915,24 +982,43 @@ st.components.v1.html("<script>window.scrollTo(0, 0);</script>", height=0)
 
 render_snow_effect()
 
-st.markdown(
-    f"""
-    <div style="display: flex; align-items: center; gap: 10px;">
-        <h1 style="margin-bottom: 0;">Controle Bastão Cesupe {BASTAO_EMOJI}</h1>
-        <img src="{PUGNOEL_URL}" alt="Pug Noel" style="width: 120px; height: auto;">
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+# --- CABEÇALHO LADO A LADO ---
+c_topo_esq, c_topo_dir = st.columns([2, 1], vertical_alignment="bottom")
 
-st.markdown("<hr style='border: 1px solid #D42426;'>", unsafe_allow_html=True) 
+with c_topo_esq:
+    st.markdown(
+        f"""
+        <div style="display: flex; align-items: center; gap: 15px;">
+            <h1 style="margin: 0; padding: 0; font-size: 2.2rem;">Controle Bastão Cesupe {BASTAO_EMOJI}</h1>
+            <img src="{PUGNOEL_URL}" alt="Pug Noel" style="width: 70px; height: auto; border-radius: 5px;">
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
+with c_topo_dir:
+    # --- NOVIDADE: MENU "ASSUMIR BASTÃO" NO TOPO ---
+    c_sub1, c_sub2 = st.columns([2, 1], vertical_alignment="bottom")
+    with c_sub1:
+        novo_responsavel = st.selectbox("Assumir Bastão (Rápido)", options=["Selecione"] + CONSULTORES, label_visibility="collapsed", key="quick_enter")
+    with c_sub2:
+        if st.button("🚀 Entrar", help="Ficar disponível na fila imediatamente"):
+            if novo_responsavel and novo_responsavel != "Selecione":
+                st.session_state[f'check_{novo_responsavel}'] = True # Marca o checkbox
+                update_queue(novo_responsavel) # Atualiza a lógica
+                st.session_state.consultor_selectbox = novo_responsavel # Já seleciona no menu principal
+                st.success(f"{novo_responsavel} agora está na fila!")
+                st.rerun()
+
+st.markdown("<hr style='border: 1px solid #D42426; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True) 
+
+# REFRESH TIME: Changed to 8 seconds for better sync
 gif_start_time = st.session_state.get('rotation_gif_start_time')
 lunch_warning_info = st.session_state.get('lunch_warning_info') 
 
 show_gif = False
 show_lunch_warning = False
-refresh_interval = 40000 
+refresh_interval = 8000 # 8 seconds sync
 
 if gif_start_time:
     try:
@@ -1060,34 +1146,20 @@ with col_principal:
         </div>
         ''', unsafe_allow_html=True)
 
+    
     st.markdown("###")
     st.header("**Consultor(a)**")
+    
+    # --- ÁREA DE AÇÃO ---
     st.selectbox('Selecione:', options=['Selecione um nome'] + CONSULTORES, key='consultor_selectbox', label_visibility='collapsed')
     st.markdown("#### "); st.markdown("**Ações:**")
     
     if 'show_activity_menu' not in st.session_state:
         st.session_state.show_activity_menu = False
     
-    if 'show_sessao_dialog' not in st.session_state:
-        st.session_state.show_sessao_dialog = False
-        
-    if 'show_sessao_eproc_dialog' not in st.session_state:
-        st.session_state.show_sessao_eproc_dialog = False
-
     def open_activity_menu():
         st.session_state.show_activity_menu = True
-        st.session_state.show_sessao_dialog = False
-        st.session_state.show_sessao_eproc_dialog = False
-        
-    def open_sessao_dialog():
-        st.session_state.show_sessao_dialog = True
-        st.session_state.show_activity_menu = False
-        st.session_state.show_sessao_eproc_dialog = False
-    
-    def open_sessao_eproc_dialog():
-        st.session_state.show_sessao_eproc_dialog = True
-        st.session_state.show_activity_menu = False
-        st.session_state.show_sessao_dialog = False
+        st.session_state.active_tool = None # Fecha outras abas ao abrir atividade
     
     c1, c2, c3, c4, c5, c6, c7 = st.columns(7) 
     c1.button('🎯 Passar', on_click=rotate_bastao, use_container_width=True, help='Passa o bastão.')
@@ -1095,28 +1167,150 @@ with col_principal:
     c3.button('📋 Atividades', on_click=open_activity_menu, use_container_width=True)
     c4.button('🍽️ Almoço', on_click=update_status, args=('Almoço', False,), use_container_width=True)
     c5.button('👤 Ausente', on_click=update_status, args=('Ausente', False,), use_container_width=True)
-    c6.button('🎙️ Sessão', on_click=open_sessao_dialog, use_container_width=True)
+    c6.button('🎙️ Sessão', on_click=lambda: update_status("Sessão", False), use_container_width=True)
     c7.button('🚶 Saída rápida', on_click=update_status, args=('Saída rápida', False,), use_container_width=True)
     
-    # --- MENUS EXPANDIDOS ---
+    st.markdown("####")
+    st.button('🔄 Atualizar (Manual)', on_click=manual_rerun, use_container_width=True)
     
-    # 1. Atividades
+    # [MODIFICAÇÃO] BOTÕES DE FERRAMENTAS AGORA AQUI EMBAIXO DO MANUAL
+    st.markdown("---")
+    
+    # Adicionado lógica de callback para garantir que a aba abra
+    def set_active_tool(tool_name):
+        # Se clicar no mesmo botão que já está aberto, fecha (toggle)
+        if st.session_state.active_tool == tool_name:
+            st.session_state.active_tool = None
+        else:
+            st.session_state.active_tool = tool_name
+            # Força o passo 1 se for chamados
+            if tool_name == "chamados":
+                st.session_state.chamado_guide_step = 1
+
+    c_tool1, c_tool2, c_tool3, c_tool4 = st.columns(4)
+    c_tool1.button("📑 Checklist", help="Gerador de Checklist Eproc", use_container_width=True, on_click=set_active_tool, args=("checklist",))
+    c_tool2.button("🆘 Chamados", help="Guia de Abertura de Chamados", use_container_width=True, on_click=set_active_tool, args=("chamados",))
+    c_tool3.button("📝 Atendimentos", help="Registrar Atendimento", use_container_width=True, on_click=set_active_tool, args=("atendimentos",))
+    c_tool4.button("⏰ H. Extras", help="Registrar Horas Extras", use_container_width=True, on_click=set_active_tool, args=("hextras",))
+        
+    # --- RENDERIZAÇÃO DO CONTEÚDO DAS ABAS (MUTUAMENTE EXCLUSIVO) ---
+    
+    # 1. CHECKLIST EPROC
+    if st.session_state.get('active_tool') == "checklist":
+        with st.container(border=True):
+            st.header("Gerador de Checklist (Sessão Eproc)")
+            if st.session_state.get('last_reg_status') == "success_sessao":
+                st.success("Registro de Sessão enviado com sucesso!")
+                if st.session_state.get('html_download_ready') and st.session_state.get('html_content_cache'):
+                    filename = st.session_state.get('html_filename', 'Checklist_Sessao.html')
+                    st.download_button(label=f"⬇️ Baixar Formulário HTML ({filename})", data=st.session_state.html_content_cache, file_name=filename, mime="text/html")
+            
+            st.markdown("### Gerar HTML e Notificar")
+            data_eproc = st.date_input("Data da Sessão:", format="DD/MM/YYYY", key='sessao_data_input')
+            camara_eproc = st.selectbox("Selecione a Câmara:", CAMARAS_OPCOES, index=None, key='sessao_camara_select')
+            
+            if st.button("Gerar e Enviar HTML", type="primary", use_container_width=True):
+                consultor = st.session_state.consultor_selectbox
+                if consultor and consultor != 'Selecione um nome':
+                    handle_sessao_submission(consultor, camara_eproc, data_eproc)
+                else:
+                    st.warning("Selecione um consultor no menu acima primeiro.")
+
+    # 2. CHAMADOS (GUIA)
+    elif st.session_state.get('active_tool') == "chamados":
+        with st.container(border=True):
+            st.header("Padrão abertura de chamados / jiras")
+            guide_step = st.session_state.get('chamado_guide_step', 1)
+            
+            if guide_step == 1:
+                st.subheader("📄 Resumo e Passo 1: Testes Iniciais")
+                st.markdown("O processo de abertura de chamados segue uma padronização.\n**PASSO 1: Testes Iniciais**\nAntes de abrir o chamado, o consultor(a) deve primeiro realizar os procedimentos de suporte e testes necessários.")
+                st.button("Próximo (Passo 2) ➡️", on_click=set_chamado_step, args=(2,))
+            elif guide_step == 2:
+                st.subheader("PASSO 2: Checklist de Abertura")
+                st.markdown("**1. Dados do Usuário**\n**2. Dados do Processo**\n**3. Descrição do Erro**\n**4. Prints/Vídeo**")
+                st.button("Próximo (Passo 3) ➡️", on_click=set_chamado_step, args=(3,))
+            elif guide_step == 3:
+                st.subheader("PASSO 3: Registrar e Informar")
+                st.markdown("Envie e-mail ao usuário informando o número do chamado.")
+                st.button("Próximo (Observações) ➡️", on_click=set_chamado_step, args=(4,))
+            elif guide_step == 4:
+                st.subheader("Observações Gerais")
+                st.markdown("* Comunicação via e-mail institucional.\n* Atualização no IN.")
+                st.button("Entendi! Abrir campo ➡️", on_click=set_chamado_step, args=(5,))
+            elif guide_step == 5:
+                st.subheader("Campo de Digitação do Chamado")
+                st.text_area("Rascunho do Chamado:", height=300, key="chamado_textarea", label_visibility="collapsed")
+                if st.button("Enviar Rascunho", on_click=handle_chamado_submission, use_container_width=True, type="primary"):
+                    pass
+
+    # 3. ATENDIMENTOS
+    elif st.session_state.get('active_tool') == "atendimentos":
+        with st.container(border=True):
+            st.markdown("### Registro de Atendimento")
+            at_data = st.date_input("Data:", value=date.today(), format="DD/MM/YYYY", key="at_data")
+            at_usuario = st.selectbox("Usuário:", REG_USUARIO_OPCOES, index=None, placeholder="Selecione...", key="at_user")
+            at_nome_setor = st.text_input("Nome usuário - Setor:", key="at_setor")
+            at_sistema = st.selectbox("Sistema:", REG_SISTEMA_OPCOES, index=None, placeholder="Selecione...", key="at_sys")
+            at_descricao = st.text_input("Descrição (até 7 palavras):", key="at_desc")
+            at_canal = st.selectbox("Canal:", REG_CANAL_OPCOES, index=None, placeholder="Selecione...", key="at_channel")
+            at_desfecho = st.selectbox("Desfecho:", REG_DESFECHO_OPCOES, index=None, placeholder="Selecione...", key="at_outcome")
+            default_jira = st.session_state.get('last_jira_number', "")
+            at_jira = st.text_input("Número do Jira:", value=default_jira, placeholder="Ex: 1234", key="at_jira_input")
+            
+            if st.button("Enviar Atendimento", type="primary", use_container_width=True):
+                consultor = st.session_state.consultor_selectbox
+                if not consultor or consultor == "Selecione um nome":
+                    st.error("Selecione um consultor.")
+                else:
+                    st.session_state['last_jira_number'] = at_jira
+                    handle_atendimento_submission(consultor, at_data, at_usuario, at_nome_setor, at_sistema, at_descricao, at_canal, at_desfecho, at_jira)
+
+    # 4. HORAS EXTRAS
+    elif st.session_state.get('active_tool') == "hextras":
+        with st.container(border=True):
+            st.markdown("### Registro de Horas Extras")
+            he_data = st.date_input("Data:", value=date.today(), format="DD/MM/YYYY")
+            he_inicio = st.time_input("Horário de Início:", value=dt_time(18, 0))
+            he_tempo = st.text_input("Tempo Total (ex: 2h30):")
+            he_motivo = st.text_input("Motivo da Hora Extra:")
+            
+            if st.button("Enviar Registro HE", type="primary", use_container_width=True):
+                consultor = st.session_state.consultor_selectbox
+                if not consultor or consultor == "Selecione um nome":
+                    st.error("Selecione um consultor.")
+                else:
+                    handle_horas_extras_submission(consultor, he_data, he_inicio, he_tempo, he_motivo)
+    
+    # 1. Atividades (Menu Expandido - Original)
     if st.session_state.show_activity_menu:
         with st.container(border=True):
             st.markdown("### Selecione a Atividade")
             atividades_escolhidas = st.multiselect("Tipo:", OPCOES_ATIVIDADES_STATUS)
+            
             texto_extra = ""
             if "Outros" in atividades_escolhidas:
                 texto_extra = st.text_input("Descreva a atividade 'Outros':", placeholder="Ex: Ajuste técnico...")
+            
             col_confirm_1, col_confirm_2 = st.columns(2)
             with col_confirm_1:
                 if st.button("Confirmar Atividade", type="primary", use_container_width=True):
                     if atividades_escolhidas:
                         str_atividades = ", ".join(atividades_escolhidas)
                         status_final = f"Atividade: {str_atividades}"
+                        
                         if "Outros" in atividades_escolhidas and texto_extra:
                             status_final += f" - {texto_extra}"
+                        
                         update_status(status_final, False)
+                        # Envia notificação de atividade para o webhook
+                        msg_atividade = (f"**📌 Atualização de Status (Atividade)**\n\n"
+                                         f"👤 **Consultor:** {st.session_state.consultor_selectbox}\n"
+                                         f"📋 **Atividades:** {str_atividades}\n"
+                                         f"ℹ️ **Detalhes:** {texto_extra if texto_extra else 'N/A'}")
+                        chat_msg = {"text": msg_atividade}
+                        threading.Thread(target=_send_webhook_thread, args=(GOOGLE_CHAT_WEBHOOK_REGISTRO, chat_msg)).start()
+
                         st.session_state.show_activity_menu = False 
                         st.rerun()
                     else:
@@ -1124,141 +1318,6 @@ with col_principal:
             with col_confirm_2:
                 if st.button("Cancelar", use_container_width=True, key='cancel_act'):
                     st.session_state.show_activity_menu = False
-                    st.rerun()
-
-    # 2. Sessão (Status Apenas)
-    if st.session_state.show_sessao_dialog:
-        with st.container(border=True):
-            st.markdown("### Informar Sessão (Status)")
-            sessao_input = st.text_input("Qual sessão?", placeholder="Ex: 1ª Câmara Cível")
-            col_sess_1, col_sess_2 = st.columns(2)
-            with col_sess_1:
-                if st.button("Confirmar Sessão", type="primary", use_container_width=True):
-                    if sessao_input.strip():
-                        status_final = f"Sessão: {sessao_input}"
-                        update_status(status_final, False)
-                        st.session_state.show_sessao_dialog = False
-                        st.rerun()
-                    else:
-                        st.warning("Digite o nome da sessão.")
-            with col_sess_2:
-                if st.button("Cancelar", use_container_width=True, key='cancel_sess'):
-                    st.session_state.show_sessao_dialog = False
-                    st.rerun()
-    
-    st.markdown("####")
-    st.button('🔄 Atualizar (Manual)', on_click=manual_rerun, use_container_width=True)
-    
-    st.markdown("---")
-    
-    # --- NOVA SEÇÃO: SESSÃO EPROC (HTML) ---
-    st.header("Gerador de Checklist (Sessão Eproc)")
-    
-    if st.session_state.last_reg_status == "success_sessao":
-        st.success("Registro de Sessão enviado com sucesso!")
-        if st.session_state.get('html_download_ready') and st.session_state.get('html_content_cache'):
-            filename = st.session_state.get('html_filename', 'Checklist_Sessao.html')
-            st.download_button(label=f"⬇️ Baixar Formulário HTML ({filename})", data=st.session_state.html_content_cache, file_name=filename, mime="text/html")
-        if st.button("Limpar Mensagem"):
-            st.session_state.last_reg_status = None
-            st.rerun()
-    elif st.session_state.last_reg_status == "error_sessao":
-        st.error("Erro ao enviar registro de sessão. Verifique se preencheu a câmara e a data.")
-        st.session_state.last_reg_status = None
-
-    if st.button("Abrir Gerador de Checklist", on_click=open_sessao_eproc_dialog, use_container_width=True):
-        pass
-
-    if st.session_state.show_sessao_eproc_dialog:
-        with st.container(border=True):
-            st.markdown("### Gerar HTML e Notificar")
-            data_eproc = st.date_input("Data da Sessão:", format="DD/MM/YYYY", key='sessao_data_input')
-            camara_eproc = st.selectbox("Selecione a Câmara:", CAMARAS_OPCOES, index=None, key='sessao_camara_select')
-            
-            c_eproc1, c_eproc2 = st.columns(2)
-            with c_eproc1:
-                if st.button("Gerar e Enviar HTML", type="primary", use_container_width=True):
-                    consultor = st.session_state.consultor_selectbox
-                    if consultor and consultor != 'Selecione um nome':
-                        if handle_sessao_submission(consultor, camara_eproc, data_eproc):
-                            st.session_state.show_sessao_eproc_dialog = False
-                            st.rerun()
-                    else:
-                        st.warning("Selecione um consultor no menu superior primeiro.")
-            with c_eproc2:
-                if st.button("Fechar", use_container_width=True):
-                    st.session_state.show_sessao_eproc_dialog = False
-                    st.rerun()
-
-    st.markdown("---")
-
-    # Chamados
-    st.header("Padrão abertura de chamados / jiras")
-    guide_step = st.session_state.get('chamado_guide_step', 0)
-    if guide_step == 0:
-        st.button("Gerar prévia", on_click=set_chamado_step, args=(1,), use_container_width=True)
-    else:
-        with st.container(border=True):
-            if guide_step == 1:
-                st.subheader("📄 Resumo e Passo 1: Testes Iniciais")
-                st.markdown("O processo de abertura de chamados segue uma padronização dividida em três etapas principais:\n**PASSO 1: Testes Iniciais**\nAntes de abrir o chamado, o consultor(a) deve primeiro realizar os procedimentos de suporte e testes necessários para **verificar e confirmar o problema** que foi relatado pelo usuário.")
-                st.button("Próximo (Passo 2) ➡️", on_click=set_chamado_step, args=(2,))
-            elif guide_step == 2:
-                st.subheader("PASSO 2: Checklist de Abertura e Descrição")
-                st.markdown("Ao abrir o chamado, é obrigatório preencher um checklist com informações detalhadas para descrever a situação.\n**1. Dados do Usuário Envolvido**\n* Nome completo, Matrícula, Tipo/perfil, Telefone.\n**2. Dados do Processo**\n* Número completo, Classe.\n**3. Descrição do Erro**\n* Passo a passo, Data/Hora, Frequência.\n**4. Prints/Vídeo**\n* Imagens do erro.\n**5. Testes Realizados**\n* Testes feitos e resultados.\n**6. Soluções de Contorno**\n**7. Identificação do Consultor**")
-                st.button("Próximo (Passo 3) ➡️", on_click=set_chamado_step, args=(3,))
-            elif guide_step == 3:
-                st.subheader("PASSO 3: Registrar e Informar o Usuário por E-mail")
-                st.markdown("Após a abertura do chamado, envie e-mail ao usuário informando que a questão é da Informática, o número do chamado e que ele deve aguardar.")
-                st.button("Próximo (Observações) ➡️", on_click=set_chamado_step, args=(4,))
-            elif guide_step == 4:
-                st.subheader("Observações Gerais Importantes")
-                st.markdown("* Comunicação via e-mail institucional.\n* Atualização no IN.\n* Controle próprio dos chamados.")
-                st.button("Entendi! Abrir campo de digitação ➡️", on_click=set_chamado_step, args=(5,))
-            elif guide_step == 5:
-                st.subheader("Campo de Digitação do Chamado")
-                st.text_area("Rascunho do Chamado:", height=300, key="chamado_textarea", label_visibility="collapsed")
-                col_btn_1, col_btn_2 = st.columns(2)
-                with col_btn_1:
-                    st.button("Enviar Rascunho", on_click=handle_chamado_submission, use_container_width=True, type="primary")
-                with col_btn_2:
-                    st.button("Cancelar", on_click=set_chamado_step, args=(0,), use_container_width=True)
-
-    # --- BOTÃO HORAS EXTRAS (NOVO) ---
-    st.markdown("---")
-    if st.button("⏰ Registrar Horas Extras", on_click=open_horas_extras_dialog, use_container_width=True):
-        pass
-
-    if st.session_state.show_horas_extras_dialog:
-        with st.container(border=True):
-            st.markdown("### Registro de Horas Extras")
-            
-            # Campos do formulário
-            he_data = st.date_input("Data:", value=date.today(), format="DD/MM/YYYY")
-            he_inicio = st.time_input("Horário de Início:", value=dt_time(18, 0))
-            he_tempo = st.text_input("Tempo Total (ex: 2h30):")
-            he_motivo = st.text_input("Motivo da Hora Extra:")
-            
-            col_he_1, col_he_2 = st.columns(2)
-            
-            # --- CORREÇÃO AQUI: LÓGICA IMPERATIVA NO LUGAR DE CALLBACK PARA EVITAR ERRO ---
-            with col_he_1:
-                if st.button("Enviar Registro", type="primary", use_container_width=True):
-                    consultor = st.session_state.consultor_selectbox
-                    if not consultor or consultor == "Selecione um nome":
-                        st.error("Selecione um consultor.")
-                    else:
-                        if send_horas_extras_to_chat(consultor, he_data, he_inicio, he_tempo, he_motivo):
-                            st.success("Horas extras registradas com sucesso!")
-                            st.session_state.show_horas_extras_dialog = False
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.error("Erro ao enviar. Verifique o Webhook.")
-            
-            with col_he_2:
-                if st.button("Cancelar", use_container_width=True, key="cancel_he"):
-                    st.session_state.show_horas_extras_dialog = False
                     st.rerun()
 
 with col_disponibilidade:
@@ -1347,8 +1406,11 @@ with col_disponibilidade:
     render_section('Ausente', '👤', ui_lists['ausente'], 'violet') 
     render_section('Indisponível', '❌', ui_lists['indisponivel'], 'grey')
 
-now = datetime.now()
+# RELATÓRIO DIÁRIO
+now_utc = datetime.utcnow()
+now_br = now_utc - timedelta(hours=3) # Horário de Brasília
 last_run_date = st.session_state.report_last_run_date.date() if isinstance(st.session_state.report_last_run_date, datetime) else datetime.min.date()
-if now.hour >= 20 and now.date() > last_run_date:
-    print(f"TRIGGER: Enviando relatório diário. Agora: {now}, Última Execução: {st.session_state.report_last_run_date}")
+
+if now_br.hour >= 20 and now_br.date() > last_run_date:
+    print(f"TRIGGER: Enviando relatório diário. Agora (BRT): {now_br}, Última Execução: {st.session_state.report_last_run_date}")
     send_daily_report()
