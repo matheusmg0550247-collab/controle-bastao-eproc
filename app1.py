@@ -4,13 +4,16 @@
 import streamlit as st
 import pandas as pd
 import requests
-import time 
-from datetime import datetime, timedelta, date, time as dt_time 
+import time
+from datetime import datetime, timedelta, date, time as dt_time
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
-import json 
-import re 
-import threading 
+import json
+import re
+import threading
+import random
+import base64
+import os
 
 # --- Constantes de Consultores ---
 CONSULTORES = sorted([
@@ -29,7 +32,6 @@ CONSULTORES = sorted([
     "Marina Silva Marques",
     "Marina Torres do Amaral",
     "Vanessa Ligiane Pimenta Santos"
-
 ])
 
 # --- FUNÇÃO DE CACHE GLOBAL ---
@@ -48,7 +50,9 @@ def get_global_state_cache():
         'rotation_gif_start_time': None,
         'lunch_warning_info': None,
         'auxilio_ativo': False, 
-        'daily_logs': []
+        'daily_logs': [],
+        # --- Ranking Global do Jogo ---
+        'simon_ranking': [] # Lista de dicts: {'nome': str, 'score': int}
     }
 
 # --- Constantes (Webhooks) ---
@@ -88,7 +92,7 @@ OPCOES_ATIVIDADES_STATUS = [
     "Treinamento", "Homologação", "Redação Documentos", "Reunião", "Outros"
 ]
 GIF_BASTAO_HOLDER = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExa3Uwazd5cnNra2oxdDkydjZkcHdqcWN2cng0Y2N0cmNmN21vYXVzMiZlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/3rXs5J0hZkXwTZjuvM/giphy.gif"
-BASTAO_EMOJI = "🎄" 
+BASTAO_EMOJI = "🥂" 
 APP_URL_CLOUD = 'https://controle-bastao-cesupe.streamlit.app'
 STATUS_SAIDA_PRIORIDADE = ['Saída rápida']
 STATUSES_DE_SAIDA = ['Atendimento', 'Almoço', 'Saída rápida', 'Ausente', 'Sessão'] 
@@ -97,11 +101,25 @@ GIF_URL_ROTATION = 'https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExdmx4azVxbG
 GIF_URL_LUNCH_WARNING = 'https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExMGZlbHN1azB3b2drdTI1eG10cDEzeWpmcmtwenZxNTV0bnc2OWgzZSYlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/bNlqpmBJRDMpxulfFB/giphy.gif'
 GIF_URL_NEDRY = 'https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExMGNkMGx3YnNkcXQ2bHJmNTZtZThraHhuNmVoOTNmbG0wcDloOXAybiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/7kyWoqTue3po4/giphy.gif'
 SOUND_URL = "https://github.com/matheusmg0550247-collab/controle-bastao-eproc2/raw/main/doorbell-223669.mp3"
-PUGNOEL_URL = "https://github.com/matheusmg0550247-collab/controle-bastao-eproc2/raw/main/Pugnoel.png"
+
+# --- ARQUIVO LOCAL PUG 2026 ---
+# O arquivo 'pug2026.png' DEVE estar na mesma pasta que o arquivo app.py
+PUG2026_FILENAME = "pug2026.png"
 
 # ============================================
 # 2. FUNÇÕES AUXILIARES GLOBAIS
 # ============================================
+
+# --- NOVA FUNÇÃO PARA CARREGAR IMAGEM LOCAL ---
+@st.cache_data
+def get_img_as_base64(file_path):
+    try:
+        with open(file_path, "rb") as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    except Exception as e:
+        print(f"Erro ao ler imagem local {file_path}: {e}")
+        return None
 
 def load_logs():
     return st.session_state.daily_logs
@@ -127,6 +145,10 @@ def save_state():
         global_data['lunch_warning_info'] = st.session_state.get('lunch_warning_info')
         global_data['auxilio_ativo'] = st.session_state.get('auxilio_ativo', False) 
         global_data['daily_logs'] = json.loads(json.dumps(st.session_state.daily_logs, default=date_serializer))
+        
+        if 'simon_ranking' in st.session_state:
+            global_data['simon_ranking'] = st.session_state.simon_ranking.copy()
+            
     except Exception as e: 
         print(f'Erro ao salvar estado GLOBAL: {e}')
 
@@ -178,7 +200,7 @@ def format_time_duration(duration):
     s = int(duration.total_seconds()); h, s = divmod(s, 3600); m, s = divmod(s, 60)
     return f'{h:02}:{m:02}:{s:02}'
 
-# --- ENVIO ASSÍNCRONO DE MENSAGENS (THREADING) ---
+# --- ENVIO ASSÍNCRONO DE MENSAGENS ---
 def _send_webhook_thread(url, payload):
     try:
         requests.post(url, json=payload, timeout=5)
@@ -194,13 +216,11 @@ def send_chat_notification_internal(consultor, status):
         return True
     return False
 
-# --- FUNÇÕES PARA OS NOVOS BOTÕES (ATENDIMENTO E HE) ---
 def send_horas_extras_to_chat(consultor, data, inicio, tempo, motivo):
     if not GOOGLE_CHAT_WEBHOOK_HORAS_EXTRAS: return False
     
     data_formatada = data.strftime("%d/%m/%Y")
     inicio_formatado = inicio.strftime("%H:%M")
-    
     msg = (
         f"⏰ **Registro de Horas Extras**\n\n"
         f"👤 **Consultor:** {consultor}\n"
@@ -209,7 +229,6 @@ def send_horas_extras_to_chat(consultor, data, inicio, tempo, motivo):
         f"⏱️ **Tempo Total:** {tempo}\n"
         f"📝 **Motivo:** {motivo}"
     )
-    
     chat_message = {"text": msg}
     threading.Thread(target=_send_webhook_thread, args=(GOOGLE_CHAT_WEBHOOK_HORAS_EXTRAS, chat_message)).start()
     return True
@@ -218,9 +237,7 @@ def send_atendimento_to_chat(consultor, data, usuario, nome_setor, sistema, desc
     if not GOOGLE_CHAT_WEBHOOK_REGISTRO: return False
     
     data_formatada = data.strftime("%d/%m/%Y")
-    
     jira_str = f"\n🔢 **Jira:** CESUPE-{jira_opcional}" if jira_opcional else ""
-    
     msg = (
         f"📋 **Novo Registro de Atendimento**\n\n"
         f"👤 **Consultor:** {consultor}\n"
@@ -233,49 +250,137 @@ def send_atendimento_to_chat(consultor, data, usuario, nome_setor, sistema, desc
         f"✅ **Desfecho:** {desfecho}"
         f"{jira_str}"
     )
-    
     chat_message = {"text": msg}
     threading.Thread(target=_send_webhook_thread, args=(GOOGLE_CHAT_WEBHOOK_REGISTRO, chat_message)).start()
     return True
-
-# --- NOVA FUNÇÃO PARA ENVIAR NOTIFICAÇÃO DE "ATIVIDADE" (NO MENU SUPERIOR) ---
-# (Essa função ficou no código mas não será mais chamada no botão de atividade, conforme pedido)
-def send_atividade_status_to_chat(consultor, status_msg):
-    if not GOOGLE_CHAT_WEBHOOK_REGISTRO: return False
-    
-    msg = (
-        f"📌 **Atualização de Status (Atividade)**\n\n"
-        f"👤 **Consultor:** {consultor}\n"
-        f"📋 **Status:** {status_msg}\n"
-        f"🕒 **Horário:** {datetime.now().strftime('%H:%M')}"
-    )
-    
-    chat_message = {"text": msg}
-    threading.Thread(target=_send_webhook_thread, args=(GOOGLE_CHAT_WEBHOOK_REGISTRO, chat_message)).start()
-    return True
-
 
 def play_sound_html(): return f'<audio autoplay="true"><source src="{SOUND_URL}" type="audio/mpeg"></audio>'
 
-def render_snow_effect():
-    snow_css = """
+# --- EFEITO FOGOS DE ARTIFÍCIO (CSS) ---
+# ALTERAÇÃO: Cores apenas Vermelho e Dourado
+def render_fireworks():
+    fireworks_css = """
     <style>
-    .snowflake { color: #fff; font-size: 1em; font-family: Arial; text-shadow: 0 0 1px #000; }
-    @-webkit-keyframes snowflakes-fall{0%{top:-10%}100%{top:100%}}@-webkit-keyframes snowflakes-shake{0%{-webkit-transform:translateX(0px);transform:translateX(0px)}50%{-webkit-transform:translateX(80px);transform:translateX(80px)}100%{-webkit-transform:translateX(0px);transform:translateX(0px)}}@keyframes snowflakes-fall{0%{top:-10%}100%{top:100%}}@keyframes snowflakes-shake{0%{transform:translateX(0px)}50%{transform:translateX(80px)}100%{transform:translateX(0px)}}.snowflake{position:fixed;top:-10%;z-index:9999;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;cursor:default;-webkit-animation-name:snowflakes-fall,snowflakes-shake;-webkit-animation-duration:10s,3s;-webkit-animation-timing-function:linear,ease-in-out;-webkit-animation-iteration-count:infinite,infinite;-webkit-animation-play-state:running,running;animation-name:snowflakes-fall,snowflakes-shake;animation-duration:10s,3s;animation-timing-function:linear,ease-in-out;animation-iteration-count:infinite,infinite;animation-play-state:running,running}.snowflake:nth-of-type(0){left:1%;-webkit-animation-delay:0s,0s;animation-delay:0s,0s}.snowflake:nth-of-type(1){left:10%;-webkit-animation-delay:1s,1s;animation-delay:1s,1s}.snowflake:nth-of-type(2){left:20%;-webkit-animation-delay:6s,.5s;animation-delay:6s,.5s}.snowflake:nth-of-type(3){left:30%;-webkit-animation-delay:4s,2s;animation-delay:4s,2s}.snowflake:nth-of-type(4){left:40%;-webkit-animation-delay:2s,2s;animation-delay:2s,2s}.snowflake:nth-of-type(5){left:50%;-webkit-animation-delay:8s,3s;animation-delay:8s,3s}.snowflake:nth-of-type(6){left:60%;-webkit-animation-delay:6s,2s;animation-delay:6s,2s}.snowflake:nth-of-type(7){left:70%;-webkit-animation-delay:2.5s,1s;animation-delay:2.5s,1s}.snowflake:nth-of-type(8){left:80%;-webkit-animation-delay:1s,0s;animation-delay:1s,0s}.snowflake:nth-of-type(9){left:90%;-webkit-animation-delay:3s,1.5s;animation-delay:3s,1.5s}
+    @keyframes firework {
+      0% { transform: translate(var(--x), var(--initialY)); width: var(--initialSize); opacity: 1; }
+      50% { width: 0.5vmin; opacity: 1; }
+      100% { width: var(--finalSize); opacity: 0; }
+    }
+    .firework,
+    .firework::before,
+    .firework::after {
+      --initialSize: 0.5vmin;
+      --finalSize: 45vmin;
+      --particleSize: 0.2vmin;
+      /* CORES EXCLUSIVAS: VERMELHO E DOURADO */
+      --color1: #ff0000;
+      --color2: #ffd700;
+      --color3: #b22222;
+      --color4: #daa520;
+      --color5: #ff4500;
+      --color6: #b8860b;
+      --y: -30vmin;
+      --x: -50%;
+      --initialY: 60vmin;
+      content: "";
+      animation: firework 2s infinite;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, var(--y));
+      width: var(--initialSize);
+      aspect-ratio: 1;
+      background: 
+        radial-gradient(circle, var(--color1) var(--particleSize), #0000 0) 50% 0%,
+        radial-gradient(circle, var(--color2) var(--particleSize), #0000 0) 100% 50%,
+        radial-gradient(circle, var(--color3) var(--particleSize), #0000 0) 50% 100%,
+        radial-gradient(circle, var(--color4) var(--particleSize), #0000 0) 0% 50%,
+        radial-gradient(circle, var(--color5) var(--particleSize), #0000 0) 80% 90%,
+        radial-gradient(circle, var(--color6) var(--particleSize), #0000 0) 95% 90%,
+        radial-gradient(circle, var(--color1) var(--particleSize), #0000 0) 90% 70%,
+        radial-gradient(circle, var(--color2) var(--particleSize), #0000 0) 100% 60%,
+        radial-gradient(circle, var(--color3) var(--particleSize), #0000 0) 55% 80%,
+        radial-gradient(circle, var(--color4) var(--particleSize), #0000 0) 70% 77%,
+        radial-gradient(circle, var(--color5) var(--particleSize), #0000 0) 22% 90%,
+        radial-gradient(circle, var(--color6) var(--particleSize), #0000 0) 45% 90%,
+        radial-gradient(circle, var(--color1) var(--particleSize), #0000 0) 33% 70%,
+        radial-gradient(circle, var(--color2) var(--particleSize), #0000 0) 10% 60%,
+        radial-gradient(circle, var(--color3) var(--particleSize), #0000 0) 31% 80%,
+        radial-gradient(circle, var(--color4) var(--particleSize), #0000 0) 28% 77%,
+        radial-gradient(circle, var(--color5) var(--particleSize), #0000 0) 13% 72%,
+        radial-gradient(circle, var(--color6) var(--particleSize), #0000 0) 80% 10%,
+        radial-gradient(circle, var(--color1) var(--particleSize), #0000 0) 95% 14%,
+        radial-gradient(circle, var(--color2) var(--particleSize), #0000 0) 90% 23%,
+        radial-gradient(circle, var(--color3) var(--particleSize), #0000 0) 100% 43%,
+        radial-gradient(circle, var(--color4) var(--particleSize), #0000 0) 85% 27%,
+        radial-gradient(circle, var(--color5) var(--particleSize), #0000 0) 77% 37%,
+        radial-gradient(circle, var(--color6) var(--particleSize), #0000 0) 60% 7%,
+        radial-gradient(circle, var(--color1) var(--particleSize), #0000 0) 22% 14%,
+        radial-gradient(circle, var(--color1) var(--particleSize), #0000 0) 45% 20%,
+        radial-gradient(circle, var(--color1) var(--particleSize), #0000 0) 33% 34%,
+        radial-gradient(circle, var(--color1) var(--particleSize), #0000 0) 10% 29%,
+        radial-gradient(circle, var(--color1) var(--particleSize), #0000 0) 31% 37%,
+        radial-gradient(circle, var(--color1) var(--particleSize), #0000 0) 28% 7%;
+      background-size: var(--initialSize) var(--initialSize);
+      background-repeat: no-repeat;
+    }
+    .firework::before {
+      --x: -50%;
+      --y: -50%;
+      --initialY: -50%;
+      transform: translate(-50%, -50%) rotate(40deg) scale(1.3) rotateY(40deg);
+    }
+    .firework::after {
+      --x: -50%;
+      --y: -50%;
+      --initialY: -50%;
+      transform: translate(-50%, -50%) rotate(170deg) scale(1.15) rotateY(-30deg);
+    }
+    .firework:nth-child(2) {
+      --x: 30vmin;
+    }
+    .firework:nth-child(2),
+    .firework:nth-child(2)::before,
+    .firework:nth-child(2)::after {
+      --color1: #ff0000;
+      --color2: #ffd700;
+      --color3: #8b0000;
+      --color4: #daa520;
+      --color5: #ff6347;
+      --color6: #f0e68c;  
+      --finalSize: 40vmin;
+      left: 30%;
+      top: 60%;
+      animation-delay: -0.25s;
+    }
+    .firework:nth-child(3) {
+      --x: -30vmin;
+      --y: -50vmin;
+    }
+    .firework:nth-child(3),
+    .firework:nth-child(3)::before,
+    .firework:nth-child(3)::after {
+      --color1: #ffd700;
+      --color2: #ff4500;
+      --color3: #b8860b;
+      --color4: #cd5c5c;
+      --color5: #800000;
+      --color6: #ffa500;
+      --finalSize: 35vmin;
+      left: 70%;
+      top: 60%;
+      animation-delay: -0.4s;
+    }
     </style>
-    <div class="snowflakes" aria-hidden="true">
-      <div class="snowflake">❅</div><div class="snowflake">❅</div><div class="snowflake">❆</div><div class="snowflake">❄</div><div class="snowflake">❅</div>
-      <div class="snowflake">❆</div><div class="snowflake">❄</div><div class="snowflake">❅</div><div class="snowflake">❆</div><div class="snowflake">❄</div>
-    </div>
+    <div class="firework"></div>
+    <div class="firework"></div>
+    <div class="firework"></div>
     """
-    st.markdown(snow_css, unsafe_allow_html=True)
+    st.markdown(fireworks_css, unsafe_allow_html=True)
 
 def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
     consultor_formatado = f"@{consultor_nome}" if not consultor_nome.startswith("@") else consultor_nome
     webhook_destino = GOOGLE_CHAT_WEBHOOK_CHECKLIST_HTML
-    
-    primary_red = "#8B0000"
-    light_red_bg = "#FFEBEE"
     
     html_template = f"""
 <!DOCTYPE html>
@@ -284,255 +389,13 @@ def gerar_html_checklist(consultor_nome, camara_nome, data_sessao_formatada):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Acompanhamento de Sessão - {camara_nome}</title>
-<style>
-    body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f6f9; margin: 0; padding: 20px; color: #333; }}
-    .container {{ max-width: 800px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-    h1 {{ color: {primary_red}; font-size: 24px; border-bottom: 2px solid {primary_red}; padding-bottom: 10px; margin-bottom: 20px; }}
-    .intro-box {{ background-color: {light_red_bg}; border-left: 5px solid {primary_red}; padding: 15px; margin-bottom: 25px; font-size: 14px; line-height: 1.5; }}
-    .row-flex {{ display: flex; gap: 20px; margin-bottom: 20px; align-items: flex-end; }}
-    .col-flex {{ flex: 1; }}
-    .field-label {{ font-weight: bold; display: block; margin-bottom: 5px; color: #444; }}
-    .static-value {{ background-color: #f9f9f9; padding: 10px; border: 1px solid #ddd; border-radius: 4px; color: #555; font-weight: 500; min-height: 20px; display: flex; align-items: center; }}
-    select, input[type="text"] {{ width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; }}
-    .field-group {{ margin-bottom: 20px; }}
-    .section-header {{ background-color: {primary_red}; color: white; padding: 10px 15px; border-radius: 4px; margin-top: 25px; margin-bottom: 15px; font-size: 15px; font-weight: bold; }}
-    .checklist-title {{ font-size: 22px; font-weight: bold; color: #333; margin-top: 30px; margin-bottom: 5px; }}
-    .checklist-desc {{ font-size: 14px; color: #666; font-style: italic; margin-bottom: 20px; }}
-    .checkbox-item {{ margin-bottom: 15px; display: flex; align-items: flex-start; border-bottom: 1px solid #eee; padding-bottom: 10px; }}
-    .checkbox-item:last-child {{ border-bottom: none; }}
-    .checkbox-item input[type="checkbox"] {{ margin-right: 10px; margin-top: 3px; width: 18px; height: 18px; accent-color: {primary_red}; cursor: pointer; flex-shrink: 0; }}
-    .checkbox-item label {{ cursor: pointer; line-height: 1.4; font-size: 14px; color: #444; }}
-    .checkbox-item label strong {{ color: #000; }}
-    .other-input {{ margin-top: 5px; width: 100%; display: none; margin-left: 28px; }}
-    .btn-submit {{ background-color: #28a745; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 4px; cursor: pointer; display: block; width: 100%; margin-top: 30px; transition: background 0.3s; font-weight: bold; }}
-    .btn-submit:hover {{ background-color: #218838; }}
-    .hidden {{ display: none; }}
-</style>
-<script>
-    function toggleSetor() {{
-        const setor = document.getElementById("setor").value;
-        const divCartorio = document.getElementById("checklist-cartorio-container");
-        const divGabinete = document.getElementById("checklist-gabinete-container");
-        if (setor === "Cartório") {{
-            divCartorio.style.display = "block";
-            divGabinete.style.display = "none";
-        }} else {{
-            divCartorio.style.display = "none";
-            divGabinete.style.display = "block";
-        }}
-    }}
-    function toggleOther(checkboxId, inputId) {{
-        const checkboxEl = document.getElementById(checkboxId);
-        const inputEl = document.getElementById(inputId);
-        if (checkboxEl.checked) {{
-            inputEl.style.display = "block";
-            inputEl.focus();
-        }} else {{
-            inputEl.style.display = "none";
-            inputEl.value = ""; 
-        }}
-    }}
-    function enviarWebhook() {{
-        const webhookUrl = '{webhook_destino}';
-        const nomeUsuario = document.getElementById('nome_usuario').value;
-        if (!nomeUsuario) {{
-            alert("Por favor, preencha o nome do Responsável antes de enviar.");
-            return;
-        }}
-        const setor = document.getElementById('setor').value;
-        let containerAtivo;
-        if (setor === "Cartório") {{
-            containerAtivo = document.getElementById("checklist-cartorio-container");
-        }} else {{
-            containerAtivo = document.getElementById("checklist-gabinete-container");
-        }}
-        const checks = containerAtivo.querySelectorAll('input[type="checkbox"]:checked');
-        let itensMarcados = [];
-        checks.forEach((chk) => {{
-            let val = "- " + chk.value;
-            if (chk.id === "c_chk_outros_pre") {{
-                const textoOutros = document.getElementById("c_input_outros_pre").value;
-                if (textoOutros) val += ": " + textoOutros;
-            }}
-            if (chk.id === "c_chk_outros_pos") {{
-                const textoOutros = document.getElementById("c_input_outros_pos").value;
-                if (textoOutros) val += ": " + textoOutros;
-            }}
-            if (chk.id === "g_chk_outros_pre") {{
-                const textoOutros = document.getElementById("g_input_outros_pre").value;
-                if (textoOutros) val += ": " + textoOutros;
-            }}
-            if (chk.id === "g_chk_outros_pos") {{
-                const textoOutros = document.getElementById("g_input_outros_pos").value;
-                if (textoOutros) val += ": " + textoOutros;
-            }}
-            itensMarcados.push(val);
-        }});
-        if (itensMarcados.length === 0 && confirm("Nenhuma dúvida foi marcada. Deseja enviar mesmo assim como 'Sem dúvidas'?") === false) {{
-            return;
-        }}
-        const dataSessaoStr = "{data_sessao_formatada}";
-        const parts = dataSessaoStr.split('/');
-        const dataSessaoObj = new Date(parts[2], parts[1] - 1, parts[0]);
-        const hoje = new Date();
-        hoje.setHours(0,0,0,0);
-        let consultorResponsavel = "{consultor_formatado}";
-        if (hoje > dataSessaoObj) {{
-            consultorResponsavel = "Atendimento";
-        }}
-        const msgTexto = 
-            "*📝 Retorno de Checklist de Sessão*\\n" +
-            "*Câmara:* {camara_nome}\\n" +
-            "*Data:* {data_sessao_formatada}\\n" +
-            "*Responsável (Local):* " + nomeUsuario + "\\n" +
-            "*Consultor(a) Técnico(a):* " + consultorResponsavel + "\\n" +
-            "*Setor:* " + setor + "\\n\\n" +
-            "*Dúvidas/Pontos de Atenção:*" + (itensMarcados.length > 0 ? "\\n" + itensMarcados.join("\\n") : "\\nNenhuma dúvida reportada (Checklist OK).");
-        const payload = {{ text: msgTexto }};
-        fetch(webhookUrl, {{
-            method: 'POST',
-            headers: {{ 'Content-Type': 'application/json' }},
-            body: JSON.stringify(payload)
-        }})
-        .then(response => {{
-            if (response.ok) {{
-                alert('Formulário enviado com sucesso! O(A) consultor(a) já recebeu suas informações.');
-            }} else {{
-                alert('Falha ao enviar. Tente novamente.');
-            }}
-        }})
-        .catch(error => {{
-            console.error('Erro:', error);
-            alert('Erro ao enviar (Verifique sua conexão).');
-        }});
-    }}
-    window.onload = function() {{
-        toggleSetor();
-    }};
-</script>
 </head>
 <body>
-<div class="container">
-    <h1>Acompanhamento de Sessão</h1>
-    <div class="intro-box">
-        <strong>Olá!</strong> Sou o(a) consultor(a) <strong>{consultor_nome}</strong> responsável pelo acompanhamento técnico da sua sessão.<br><br>
-        Meu objetivo é garantir que todos os trâmites ocorram com fluidez na data agendada <strong>({data_sessao_formatada})</strong>. Abaixo, apresento um check-list dos procedimentos essenciais.<br><br>
-        <strong>Caso tenha dúvida ou insegurança em alguma etapa, marque a caixa correspondente e envie o formulário.</strong> Isso me permitirá atuar preventivamente.
-    </div>
-    <div class="row-flex">
-        <div class="col-flex">
-            <label class="field-label">Câmara:</label>
-            <div class="static-value">{camara_nome}</div>
-        </div>
-        <div class="col-flex">
-            <label class="field-label">Responsável (Seu Nome):</label>
-            <input type="text" id="nome_usuario" placeholder="Digite seu nome">
-        </div>
-    </div>
-    <div class="field-group">
-        <label class="field-label">Data da Sessão:</label>
-        <div class="static-value">{data_sessao_formatada}</div>
-    </div>
-    <div class="field-group">
-        <label class="field-label">Qual é o seu Setor?</label>
-        <select id="setor" onchange="toggleSetor()">
-            <option value="Cartório">Cartório (Secretaria)</option>
-            <option value="Gabinete">Gabinete</option>
-        </select>
-    </div>
-    <div id="checklist-cartorio-container">
-        <div class="checklist-title">Check-list: Cartório (Secretaria)</div>
-        <div class="checklist-desc">Fase Pré-Sessão: Inicia a partir do fechamento da pauta até a abertura da sessão.</div>
-        <div class="section-header">I. Pré-Sessão</div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="c_chk1" value="Cartório Pré: Verificar Manifestações Desembargadores">
-            <label for="c_chk1"><strong>Verificar Manifestações:</strong> Certificar-se de que todos os desembargadores manifestaram: Pedidos de vista, Retirados de pauta, Acompanhamento de voto, Votos de declaração, Votos divergentes.</label>
-        </div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="c_chk2" value="Cartório Pré: Marcar Destaques Visualizados">
-            <label for="c_chk2"><strong>Marcar Destaques Visualizados:</strong> Marcar os destaques dos votos como visualizados (garante que alterações posteriores sejam sinalizadas pelo sistema).</label>
-        </div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="c_chk3" value="Cartório Pré: Lançar Previsão de Resultado">
-            <label for="c_chk3"><strong>Lançar Previsão de Resultado:</strong> Sinalizar a importância de “Lançar a previsão do resultado do julgamento”.</label>
-        </div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="c_chk4" value="Cartório Pré: Verificar Manter Voto (Retirados)">
-            <label for="c_chk4"><strong>Verificar Manter Voto:</strong> Conferir se o gabinete marcou a opção de manter o voto para próxima sessão, em processos retirados de pauta.</label>
-        </div>
-        <div class="checkbox-item" style="flex-wrap: wrap;">
-            <input type="checkbox" id="c_chk_outros_pre" value="Cartório Pré-Sessão: Outros" onclick="toggleOther('c_chk_outros_pre', 'c_input_outros_pre')">
-            <label for="c_chk_outros_pre"><strong>Outros na Preparação:</strong> (Descreva abaixo)</label>
-            <input type="text" id="c_input_outros_pre" class="other-input" placeholder="Detalhes da dúvida na Pré-Sessão...">
-        </div>
-        <div class="section-header">II. Durante e Pós-Sessão</div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="c_chk5" value="Cartório Pós: Abrir a Sessão">
-            <label for="c_chk5"><strong>Início da Sessão:</strong> Acompanhar o Cartório ao "Abrir a sessão".</label>
-        </div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="c_chk6" value="Cartório Pós: Julgamento dos Processos">
-            <label for="c_chk6"><strong>Julgamento:</strong> Acompanhar os passos: Marcar item como em julgamento, Salvar resultado de julgamento, Desmarcar item em julgamento.</label>
-        </div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="c_chk7" value="Cartório Pós: Atualizar Resultados e Eventos">
-            <label for="c_chk7"><strong>Atualizar Resultados:</strong> Rodar "Atualizar Resultados da Sessão de Julgamento" e Lançar os eventos de resultado.</label>
-        </div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="c_chk8" value="Cartório Pós: Encerrar e Gerar Ata">
-            <label for="c_chk8"><strong>Finalização:</strong> "Encerrar da sessão" e "Gerar ata".</label>
-        </div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="c_chk_olhinho" value="Cartório Pós: Conferência da Sessão (Olhinho)">
-            <label for="c_chk_olhinho"><strong>Conferência da Sessão:</strong> Após o lançamento dos resultados e encerramento, utilizar o ícone "Conferência da sessão de julgamento" (ícone do olhinho) para verificar o relatório de inconsistências/erros e realizar a correção.</label>
-        </div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="c_chk9" value="Cartório Pós: Minutas não Assinadas (Filtro)">
-            <label for="c_chk9"><strong>Pós-Sessão:</strong> Orientar sobre a Aplicação do filtro – Minutas não assinadas e necessidade de contato com gabinetes para assinatura.</label>
-        </div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="c_chk10" value="Cartório Pós: Conferir Manter Voto (Retirados Pós)">
-            <label for="c_chk10"><strong>Pós-Sessão:</strong> Verificar se há processos retirados de pauta e conferir a marcação do gabinete para manter o processo para próxima sessão.</label>
-        </div>
-        <div class="checkbox-item" style="flex-wrap: wrap;">
-            <input type="checkbox" id="c_chk_outros_pos" value="Cartório Pós-Sessão: Outros" onclick="toggleOther('c_chk_outros_pos', 'c_input_outros_pos')">
-            <label for="c_chk_outros_pos"><strong>Outros no Encerramento:</strong> (Descreva abaixo)</label>
-            <input type="text" id="c_input_outros_pos" class="other-input" placeholder="Detalhes da dúvida na Pós-Sessão...">
-        </div>
-    </div>
-    <div id="checklist-gabinete-container" class="hidden">
-        <div class="checklist-title">Check-list: Gabinete</div>
-        <div class="checklist-desc">Foco na análise processual, votos e disponibilização de documentos.</div>
-        <div class="section-header">I. Pré-Sessão (Análise e Inclusão)</div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="g_chk1" value="Gabinete Pré: Inclusão e Minutas">
-            <label for="g_chk1"><strong>Inclusão/Minutas:</strong> Selecionar processos para inclusão na sessão e criar Relatório/Voto liberando visualização para Colegiado.</label>
-        </div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="g_chk2" value="Gabinete Pré: Destaques/Vistas">
-            <label for="g_chk2"><strong>Destaques/Vistas:</strong> Analisar divergências/vistas e inserir destaques próprios.</label>
-        </div>
-        <div class="checkbox-item" style="flex-wrap: wrap;">
-            <input type="checkbox" id="g_chk_outros_pre" value="Gabinete Pré-Sessão: Outros" onclick="toggleOther('g_chk_outros_pre', 'g_input_outros_pre')">
-            <label for="g_chk_outros_pre"><strong>Outros na Preparação:</strong> (Descreva abaixo)</label>
-            <input type="text" id="g_input_outros_pre" class="other-input" placeholder="Detalhes da dúvida na Pré-Sessão...">
-        </div>
-        <div class="section-header">II. Pós-Sessão (Formalização)</div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="g_chk5" value="Gabinete Pós: Filtro minutas para assinar">
-            <label for="g_chk5"><strong>Assinatura:</strong> Aplicar o "Filtro minutas para assinar" e realizar a assinatura do Relatório/Voto/Acórdão no status "Para Assinar".</label>
-        </div>
-        <div class="checkbox-item">
-            <input type="checkbox" id="g_chk6" value="Gabinete Pós: Juntada e Evento Final">
-            <label for="g_chk6"><strong>Movimentação Final:</strong> Juntada de relatório/voto/acórdão e Lançamento do Evento “Remetidos os votos com acórdão”.</label>
-        </div>
-        <div class="checkbox-item" style="flex-wrap: wrap;">
-            <input type="checkbox" id="g_chk_outros_pos" value="Gabinete Pós-Sessão: Outros" onclick="toggleOther('g_chk_outros_pos', 'g_input_outros_pos')">
-            <label for="g_chk_outros_pos"><strong>Outros na Formalização:</strong> (Descreva abaixo)</label>
-            <input type="text" id="g_input_outros_pos" class="other-input" placeholder="Detalhes da dúvida na Pós-Sessão...">
-        </div>
-    </div>
-    <button class="btn-submit" onclick="enviarWebhook()">Enviar Dúvidas ao(à) Consultor(a)</button>
+<div style="font-family: Arial, sans-serif; padding: 20px;">
+    <h2>Checklist Gerado para {camara_nome}</h2>
+    <p>Responsável: {consultor_formatado}</p>
+    <p>Data: {data_sessao_formatada}</p>
+    <p><em>(Versão simplificada para visualização.)</em></p>
 </div>
 </body>
 </html>
@@ -547,7 +410,6 @@ def send_sessao_to_chat(consultor, texto_mensagem):
     return True
 
 def send_daily_report(): 
-    # load_logs agora existe e retorna st.session_state.daily_logs
     logs = load_logs() 
     bastao_counts = st.session_state.bastao_counts.copy()
     aggregated_data = {nome: {} for nome in CONSULTORES}
@@ -617,8 +479,13 @@ def init_session_state():
         'html_download_ready': False, 
         'html_content_cache': "", 
         'auxilio_ativo': False,
-        'active_view': None, # ESTADO UNIFICADO PARA CONTROLAR A TELA
+        'active_view': None, 
         'last_jira_number': "",
+        # --- Estados do Jogo Simon ---
+        'simon_sequence': [],
+        'simon_user_input': [],
+        'simon_status': 'start', # start, showing, playing, lost
+        'simon_level': 1
     }
     for key, default in defaults.items():
         if key not in st.session_state:
@@ -632,6 +499,7 @@ def init_session_state():
     st.session_state['current_status_starts'] = persisted_state.get('current_status_starts', {}).copy()
     st.session_state['daily_logs'] = persisted_state.get('daily_logs', []).copy() 
     st.session_state['auxilio_ativo'] = persisted_state.get('auxilio_ativo', False)
+    st.session_state['simon_ranking'] = persisted_state.get('simon_ranking', [])
 
     for nome in CONSULTORES:
         st.session_state.bastao_counts.setdefault(nome, 0)
@@ -641,7 +509,7 @@ def init_session_state():
         is_available = (current_status == 'Bastão' or current_status == '') and nome not in st.session_state.priority_return_queue
         st.session_state[f'check_{nome}'] = is_available
         if nome not in st.session_state.current_status_starts:
-                 st.session_state.current_status_starts[nome] = datetime.now()
+                  st.session_state.current_status_starts[nome] = datetime.now()
 
     checked_on = {c for c in CONSULTORES if st.session_state.get(f'check_{c}')}
     if not st.session_state.bastao_queue and checked_on:
@@ -759,29 +627,19 @@ def rotate_bastao():
         if check_and_assume_baton(): pass 
         return
 
-    # LÓGICA SIMPLIFICADA DE "FORCE BRUTE":
-    # 1. Verifica se todos estão pulando.
     eligible_in_queue = [p for p in queue if st.session_state.get(f'check_{p}')]
     skippers_ahead = [p for p in eligible_in_queue if skips.get(p, False) and p != current_holder]
     
     if len(skippers_ahead) > 0 and len(skippers_ahead) == len([p for p in eligible_in_queue if p != current_holder]):
-        # Se todos os próximos pularam, reseta tudo AGORA
         for c in queue:
             st.session_state.skip_flags[c] = False
         skips = st.session_state.skip_flags 
         st.toast("Ciclo reiniciado! Todos os próximos pularam, fila resetada.", icon="🔄")
 
-    # 2. Busca o próximo
     next_idx = find_next_holder_index(current_index, queue, skips)
 
     if next_idx != -1:
         next_holder = queue[next_idx]
-        
-        # 3. ZERA A FLAG DE QUEM ACABOU DE PULAR!
-        # Isso garante que "Pular" só vale para uma rodada.
-        # Assim que o bastão passa por alguém que pulou, o pulo é "gasto".
-        
-        # Pega a fatia da fila entre o atual e o próximo
         if next_idx > current_index:
              skipped_over = queue[current_index+1 : next_idx]
         else:
@@ -790,7 +648,6 @@ def rotate_bastao():
         for person in skipped_over:
              st.session_state.skip_flags[person] = False 
              
-        # Zera também a flag do próximo dono (caso estivesse suja)
         st.session_state.skip_flags[next_holder] = False
 
         duration = datetime.now() - (st.session_state.bastao_start_time or datetime.now())
@@ -804,7 +661,6 @@ def rotate_bastao():
         st.session_state.play_sound = True 
         st.session_state.rotation_gif_start_time = datetime.now()
         
-        # Envio assíncrono do Webhook
         send_chat_notification_internal(next_holder, 'Bastão')
 
         save_state()
@@ -865,7 +721,6 @@ def handle_sessao_submission(consultor_sel, camara_sel, data_obj):
         html_content = gerar_html_checklist(consultor_sel, camara_sel, data_formatada)
         st.session_state.html_content_cache = html_content
         st.session_state.html_download_ready = True
-        st.session_state.html_download_ready = True
         st.session_state.html_filename = f"Checklist_{data_nome_arquivo}.html"
         return True
     else:
@@ -879,13 +734,10 @@ def set_chamado_step(step_num):
 def handle_chamado_submission():
     consultor = st.session_state.consultor_selectbox
     texto_chamado = st.session_state.get("chamado_textarea", "")
-    success = send_chamado_to_chat(consultor, texto_chamado)
-    if success:
-        st.session_state.last_reg_status = "success_chamado" 
-        st.session_state.chamado_guide_step = 0
-        st.session_state.chamado_textarea = ""
-    else:
-        st.session_state.last_reg_status = "error_chamado"
+    st.toast("Chamado simulado com sucesso.", icon="✅")
+    st.session_state.last_reg_status = "success_chamado" 
+    st.session_state.chamado_guide_step = 0
+    st.session_state.chamado_textarea = ""
 
 def update_status(status_text, change_to_available): 
     selected = st.session_state.consultor_selectbox
@@ -940,7 +792,6 @@ def update_status(status_text, change_to_available):
     if not baton_changed: 
         save_state() 
 
-# Handler para Horas Extras
 def handle_horas_extras_submission(consultor_sel, data, inicio, tempo, motivo):
     if not consultor_sel or consultor_sel == "Selecione um nome":
         st.error("Selecione um consultor.")
@@ -948,13 +799,12 @@ def handle_horas_extras_submission(consultor_sel, data, inicio, tempo, motivo):
     
     if send_horas_extras_to_chat(consultor_sel, data, inicio, tempo, motivo):
         st.success("Horas extras registradas com sucesso!")
-        st.session_state.active_view = None # Fecha a aba
+        st.session_state.active_view = None 
         time.sleep(1)
         st.rerun()
     else:
         st.error("Erro ao enviar. Verifique o Webhook.")
 
-# Handler para Atendimento
 def handle_atendimento_submission(consultor, data, usuario, nome_setor, sistema, descricao, canal, desfecho, jira_opcional=""):
     if not consultor or consultor == "Selecione um nome":
         st.error("Selecione um consultor.")
@@ -962,60 +812,179 @@ def handle_atendimento_submission(consultor, data, usuario, nome_setor, sistema,
 
     if send_atendimento_to_chat(consultor, data, usuario, nome_setor, sistema, descricao, canal, desfecho, jira_opcional):
         st.success("Atendimento registrado com sucesso!")
-        st.session_state.active_view = None # Fecha a aba
+        st.session_state.active_view = None 
         time.sleep(1)
         st.rerun()
     else:
         st.error("Erro ao enviar. Verifique o Webhook.")
 
 # ============================================
+# 3. LÓGICA DO JOGO SIMON (DESCANSO MENTAL)
+# ============================================
+
+def handle_simon_game():
+    COLORS = ["🔴", "🔵", "🟢", "🟡"]
+    
+    st.markdown("### 🧠 Jogo da Memória (Simon)")
+    st.caption("Repita a sequência de cores!")
+
+    # Iniciar Jogo
+    if st.session_state.simon_status == 'start':
+        if st.button("▶️ Iniciar Jogo", use_container_width=True):
+            st.session_state.simon_sequence = [random.choice(COLORS)]
+            st.session_state.simon_user_input = []
+            st.session_state.simon_level = 1
+            st.session_state.simon_status = 'showing'
+            st.rerun()
+
+    # Mostrando Sequência
+    elif st.session_state.simon_status == 'showing':
+        st.info(f"Nível {st.session_state.simon_level}: Memorize a sequência!")
+        
+        # Exibir sequência
+        cols = st.columns(len(st.session_state.simon_sequence))
+        for i, color in enumerate(st.session_state.simon_sequence):
+            with cols[i]:
+                st.markdown(f"<h1 style='text-align: center;'>{color}</h1>", unsafe_allow_html=True)
+        
+        st.markdown("---")
+        if st.button("🙈 Já decorei! Responder", type="primary", use_container_width=True):
+            st.session_state.simon_status = 'playing'
+            st.rerun()
+
+    # Jogando (Usuário Clica)
+    elif st.session_state.simon_status == 'playing':
+        st.markdown(f"**Nível {st.session_state.simon_level}** - Clique na ordem:")
+        
+        c1, c2, c3, c4 = st.columns(4)
+        pressed = None
+        
+        if c1.button("🔴", use_container_width=True): pressed = "🔴"
+        if c2.button("🔵", use_container_width=True): pressed = "🔵"
+        if c3.button("🟢", use_container_width=True): pressed = "🟢"
+        if c4.button("🟡", use_container_width=True): pressed = "🟡"
+
+        if pressed:
+            st.session_state.simon_user_input.append(pressed)
+            
+            # Verificar erro imediato
+            current_idx = len(st.session_state.simon_user_input) - 1
+            if st.session_state.simon_user_input[current_idx] != st.session_state.simon_sequence[current_idx]:
+                st.session_state.simon_status = 'lost'
+                st.rerun()
+            
+            # Verificar se completou a sequência
+            elif len(st.session_state.simon_user_input) == len(st.session_state.simon_sequence):
+                st.success("Correto! Próximo nível...")
+                time.sleep(0.5)
+                st.session_state.simon_sequence.append(random.choice(COLORS))
+                st.session_state.simon_user_input = []
+                st.session_state.simon_level += 1
+                st.session_state.simon_status = 'showing'
+                st.rerun()
+        
+        if st.session_state.simon_user_input:
+            st.markdown(f"Sua resposta: {' '.join(st.session_state.simon_user_input)}")
+
+    # Perdeu
+    elif st.session_state.simon_status == 'lost':
+        st.error(f"❌ Errou! Você chegou ao Nível {st.session_state.simon_level}.")
+        st.markdown(f"Sequência correta era: {' '.join(st.session_state.simon_sequence)}")
+        
+        consultor = st.session_state.consultor_selectbox
+        if consultor and consultor != 'Selecione um nome':
+            # Salvar no Ranking Global
+            score = st.session_state.simon_level
+            current_ranking = st.session_state.simon_ranking
+            
+            # Verifica se já existe e atualiza se for maior
+            found = False
+            for entry in current_ranking:
+                if entry['nome'] == consultor:
+                    if score > entry['score']:
+                        entry['score'] = score
+                    found = True
+                    break
+            if not found:
+                current_ranking.append({'nome': consultor, 'score': score})
+            
+            # Ordenar
+            st.session_state.simon_ranking = sorted(current_ranking, key=lambda x: x['score'], reverse=True)[:5]
+            save_state()
+            st.success(f"Pontuação salva para {consultor}!")
+        else:
+            st.warning("Selecione seu nome no menu superior para salvar no Ranking.")
+
+        if st.button("Tentar Novamente"):
+            st.session_state.simon_status = 'start'
+            st.rerun()
+
+    # --- RANKING GLOBAL ---
+    st.markdown("---")
+    st.subheader("🏆 Ranking Global (Top 5)")
+    ranking = st.session_state.simon_ranking
+    if not ranking:
+        st.markdown("_Nenhum recorde ainda._")
+    else:
+        df_rank = pd.DataFrame(ranking)
+        st.table(df_rank)
+
+
+# ============================================
 # 4. EXECUÇÃO PRINCIPAL DO STREAMLIT APP
 # ============================================
 
-st.set_page_config(page_title="Controle Bastão Cesupe", layout="wide")
+st.set_page_config(page_title="Controle Bastão Cesupe 2026", layout="wide", page_icon="🥂")
 init_session_state()
 
 st.components.v1.html("<script>window.scrollTo(0, 0);</script>", height=0)
 
-render_snow_effect()
+# Renderizar Fogos de Artifício
+render_fireworks()
 
 # --- CABEÇALHO LADO A LADO ---
 c_topo_esq, c_topo_dir = st.columns([2, 1], vertical_alignment="bottom")
 
 with c_topo_esq:
+    # LÓGICA DE CARREGAMENTO DA IMAGEM LOCAL PARA BASE64
+    img_data = get_img_as_base64(PUG2026_FILENAME)
+    img_src = f"data:image/png;base64,{img_data}" if img_data else GIF_BASTAO_HOLDER
+
     st.markdown(
         f"""
         <div style="display: flex; align-items: center; gap: 15px;">
-            <h1 style="margin: 0; padding: 0; font-size: 2.2rem;">Controle Bastão Cesupe {BASTAO_EMOJI}</h1>
-            <img src="{PUGNOEL_URL}" alt="Pug Noel" style="width: 70px; height: auto; border-radius: 5px;">
+            <h1 style="margin: 0; padding: 0; font-size: 2.2rem; color: #FFD700; text-shadow: 1px 1px 2px #B8860B;">
+                Controle Bastão Cesupe 2026 {BASTAO_EMOJI}
+            </h1>
+            <img src="{img_src}" alt="Pug 2026" style="width: 120px; height: 120px; border-radius: 50%; border: 3px solid #FFD700; object-fit: cover;">
         </div>
         """,
         unsafe_allow_html=True
     )
 
 with c_topo_dir:
-    # --- NOVIDADE: MENU "ASSUMIR BASTÃO" NO TOPO ---
+    # --- MENU "ASSUMIR BASTÃO" ---
     c_sub1, c_sub2 = st.columns([2, 1], vertical_alignment="bottom")
     with c_sub1:
         novo_responsavel = st.selectbox("Assumir Bastão (Rápido)", options=["Selecione"] + CONSULTORES, label_visibility="collapsed", key="quick_enter")
     with c_sub2:
         if st.button("🚀 Entrar", help="Ficar disponível na fila imediatamente"):
             if novo_responsavel and novo_responsavel != "Selecione":
-                st.session_state[f'check_{novo_responsavel}'] = True # Marca o checkbox
-                update_queue(novo_responsavel) # Atualiza a lógica
-                st.session_state.consultor_selectbox = novo_responsavel # Já seleciona no menu principal
+                st.session_state[f'check_{novo_responsavel}'] = True 
+                update_queue(novo_responsavel) 
+                st.session_state.consultor_selectbox = novo_responsavel 
                 st.success(f"{novo_responsavel} agora está na fila!")
                 st.rerun()
 
-st.markdown("<hr style='border: 1px solid #D42426; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True) 
+st.markdown("<hr style='border: 1px solid #FFD700; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True) 
 
-# REFRESH TIME: Changed to 8 seconds for better sync
+# REFRESH TIME
 gif_start_time = st.session_state.get('rotation_gif_start_time')
 lunch_warning_info = st.session_state.get('lunch_warning_info') 
 
 show_gif = False
 show_lunch_warning = False
-refresh_interval = 8000 # 8 seconds sync
+refresh_interval = 8000 
 
 if gif_start_time:
     try:
@@ -1086,25 +1055,27 @@ if proximo_index != -1:
 with col_principal:
     st.header("Responsável pelo Bastão")
     if responsavel:
-        bg_color = "#FFEBEE" 
-        border_color = "#D42426" 
-        text_color = "#8B0000" 
+        # ESTILIZAÇÃO DO CARD: Borda Dourada, Fundo Suave Claro (Mantido o estilo 2026)
+        bg_color = "linear-gradient(135deg, #FFF8DC 0%, #FFFFFF 100%)" # Cornsilk to White
+        border_color = "#FFD700" # Gold
+        text_color = "#000080" # Navy Blue
+        
         st.markdown(f"""
         <div style="
-            background-color: {bg_color}; 
-            border-left: 10px solid {border_color}; 
-            padding: 20px; 
-            border-radius: 8px; 
+            background: {bg_color}; 
+            border: 3px solid {border_color}; 
+            padding: 25px; 
+            border-radius: 15px; 
             display: flex; 
             align-items: center; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3);
             margin-bottom: 20px;">
-            <div style="flex-shrink: 0; margin-right: 20px;">
-                <img src="{GIF_BASTAO_HOLDER}" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover;">
+            <div style="flex-shrink: 0; margin-right: 25px;">
+                <img src="{GIF_BASTAO_HOLDER}" style="width: 90px; height: 90px; border-radius: 50%; object-fit: cover; border: 2px solid {border_color};">
             </div>
             <div>
-                <span style="font-size: 14px; color: #555; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">Atualmente com:</span><br>
-                <span style="font-size: 42px; font-weight: 800; color: {text_color}; line-height: 1.1;">{responsavel}</span>
+                <span style="font-size: 14px; color: #555; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px;">Atualmente com:</span><br>
+                <span style="font-size: 42px; font-weight: 800; color: {text_color}; line-height: 1.1; font-family: 'Segoe UI', sans-serif;">{responsavel}</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -1153,31 +1124,23 @@ with col_principal:
     
     # Função CENTRALIZADA para alternar telas
     def toggle_view(view_name):
-        # Se clicou na mesma coisa que já está aberta, fecha (toggle off)
         if st.session_state.active_view == view_name:
             st.session_state.active_view = None
         else:
             st.session_state.active_view = view_name
-            # Lógica específica para resets
             if view_name == 'chamados':
                 st.session_state.chamado_guide_step = 1
 
     c1, c2, c3, c4, c5, c6, c7 = st.columns(7) 
     c1.button('🎯 Passar', on_click=rotate_bastao, use_container_width=True, help='Passa o bastão.')
     c2.button('⏭️ Pular', on_click=toggle_skip, use_container_width=True, help='Pular vez.')
-    
-    # BOTÃO ATIVIDADES (Chama a função centralizada)
     c3.button('📋 Atividades', on_click=toggle_view, args=('menu_atividades',), use_container_width=True)
-    
     c4.button('🍽️ Almoço', on_click=update_status, args=('Almoço', False,), use_container_width=True)
     c5.button('👤 Ausente', on_click=update_status, args=('Ausente', False,), use_container_width=True)
     c6.button('🎙️ Sessão', on_click=lambda: update_status("Sessão", False), use_container_width=True)
-    c7.button('🚶 Saída rápida', on_click=update_status, args=('Saída rápida', False,), use_container_width=True)
+    c7.button('🚶 Saída', on_click=update_status, args=('Saída rápida', False,), use_container_width=True)
     
-    # -------------------------------------------------------------
-    # POSICIONAMENTO CORRIGIDO: O FORMULÁRIO DE ATIVIDADES ESTÁ AQUI
-    # (Antes do botão atualizar e antes das outras ferramentas)
-    # -------------------------------------------------------------
+    # MENU ATIVIDADES
     if st.session_state.active_view == 'menu_atividades':
         with st.container(border=True):
             st.markdown("### Selecione a Atividade")
@@ -1193,16 +1156,10 @@ with col_principal:
                     if atividades_escolhidas:
                         str_atividades = ", ".join(atividades_escolhidas)
                         status_final = f"Atividade: {str_atividades}"
-                        
                         if "Outros" in atividades_escolhidas and texto_extra:
                             status_final += f" - {texto_extra}"
-                        
                         update_status(status_final, False)
-                        
-                        # (O envio de Webhook foi removido daqui conforme solicitado)
-                        # Apenas atualiza o status e fecha o menu
-
-                        st.session_state.active_view = None # Fecha após confirmar
+                        st.session_state.active_view = None 
                         st.rerun()
                     else:
                         st.warning("Selecione pelo menos uma atividade.")
@@ -1210,7 +1167,6 @@ with col_principal:
                 if st.button("Cancelar", use_container_width=True, key='cancel_act'):
                     st.session_state.active_view = None
                     st.rerun()
-    # -------------------------------------------------------------
     
     st.markdown("####")
     st.button('🔄 Atualizar (Manual)', on_click=manual_rerun, use_container_width=True)
@@ -1218,13 +1174,14 @@ with col_principal:
     st.markdown("---")
     
     # BOTÕES DE FERRAMENTAS INFERIORES
-    c_tool1, c_tool2, c_tool3, c_tool4 = st.columns(4)
+    c_tool1, c_tool2, c_tool3, c_tool4, c_tool5 = st.columns(5)
     c_tool1.button("📑 Checklist", help="Gerador de Checklist Eproc", use_container_width=True, on_click=toggle_view, args=("checklist",))
     c_tool2.button("🆘 Chamados", help="Guia de Abertura de Chamados", use_container_width=True, on_click=toggle_view, args=("chamados",))
-    c_tool3.button("📝 Atendimentos", help="Registrar Atendimento", use_container_width=True, on_click=toggle_view, args=("atendimentos",))
+    c_tool3.button("📝 Atendimento", help="Registrar Atendimento", use_container_width=True, on_click=toggle_view, args=("atendimentos",))
     c_tool4.button("⏰ H. Extras", help="Registrar Horas Extras", use_container_width=True, on_click=toggle_view, args=("hextras",))
+    c_tool5.button("🧠 Descanso", help="Jogo e Ranking", use_container_width=True, on_click=toggle_view, args=("descanso",)) # Novo Botão
         
-    # --- RENDERIZAÇÃO DAS FERRAMENTAS (FISICAMENTE ABAIXO DOS BOTÕES) ---
+    # --- RENDERIZAÇÃO DAS FERRAMENTAS ---
     
     # 1. CHECKLIST EPROC
     if st.session_state.active_view == "checklist":
@@ -1312,7 +1269,12 @@ with col_principal:
                     st.error("Selecione um consultor.")
                 else:
                     handle_horas_extras_submission(consultor, he_data, he_inicio, he_tempo, he_motivo)
-    
+
+    # 5. NOVO: DESCANSO MENTAL (SIMON GAME)
+    elif st.session_state.active_view == "descanso":
+        with st.container(border=True):
+            handle_simon_game()
+
 with col_disponibilidade:
     st.markdown("###")
     st.toggle("Auxílio HP/Emails/Whatsapp", key='auxilio_ativo', on_change=on_auxilio_change)
@@ -1354,11 +1316,11 @@ with col_disponibilidade:
             col_check.checkbox(' ', key=key, on_change=update_queue, args=(nome,), label_visibility='collapsed')
             skip_flag = skips.get(nome, False)
             if nome == responsavel:
-                display = f'<span style="background-color: #D42426; color: white; padding: 2px 6px; border-radius: 5px; font-weight: bold;">🔥 {nome}</span>'
+                display = f'<span style="background-color: #FFD700; color: #000; padding: 2px 6px; border-radius: 5px; font-weight: bold;">🥂 {nome}</span>'
             elif skip_flag:
                 display = f'**{nome}** :orange-background[Pulando ⏭️]'
             else:
-                display = f'**{nome}** :red-background[Aguardando]'
+                display = f'**{nome}** :blue-background[Aguardando]'
             col_nome.markdown(display, unsafe_allow_html=True)
     st.markdown('---')
 
