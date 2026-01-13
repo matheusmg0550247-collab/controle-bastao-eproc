@@ -1245,7 +1245,7 @@ with col_principal:
     st.markdown("""
     * [Notebook Lm Eproc Gabinete](https://notebooklm.google.com/notebook/e2fcf868-1697-4a4c-a7db-fed5560e04ad)
     * [Eproc Cartório](https://notebooklm.google.com/notebook/8b7fd5e6-ee33-4d5e-945c-f763c443846f)
-    * [Respostas Padrão e Atendimentos Cesupe](https://notebooklm.google.com/notebook/5504cfb6-174b-4cba-bbd4-ee22f45f60fe)
+    * [Respostas Padrões e Atendimentos Cesupe](https://notebooklm.google.com/notebook/5504cfb6-174b-4cba-bbd4-ee22f45f60fe)
     """)
 
 with col_disponibilidade:
