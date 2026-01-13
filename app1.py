@@ -17,7 +17,7 @@ import os
 
 # --- Constantes de Consultores ---
 CONSULTORES = sorted([
-   "Alex Paulo",
+     "Alex Paulo",
 "Dirceu Gonçalves",
 "Douglas De Souza",
 "Farley Leandro",
@@ -972,19 +972,23 @@ current_index = queue.index(responsavel) if responsavel in queue else -1
 proximo_index = find_next_holder_index(current_index, queue, skips)
 proximo = queue[proximo_index] if proximo_index != -1 else None
 restante = []
+
+# --- LÓGICA CORRIGIDA: MOSTRAR TODOS DA FILA ---
 if proximo_index != -1: 
     num_q = len(queue)
-    start_check_idx = (proximo_index + 1) % num_q
-    current_check_idx = start_check_idx
-    checked_count = 0
-    while checked_count < num_q:
-        if current_check_idx == start_check_idx and checked_count > 0: break
-        if 0 <= current_check_idx < num_q:
-            consultor = queue[current_check_idx]
-            if consultor != responsavel and consultor != proximo and not skips.get(consultor, False) and st.session_state.get(f'check_{consultor}'):
-                restante.append(consultor)
-        current_check_idx = (current_check_idx + 1) % num_q
-        checked_count += 1
+    # Começa logo após o "Próximo" para manter a ordem visual cíclica
+    idx = (proximo_index + 1) % num_q 
+    
+    # Itera por toda a fila para garantir que todos sejam verificados
+    for _ in range(num_q):
+        person = queue[idx]
+        # Adiciona todos que não sejam o Responsável e nem o Próximo
+        # Sem filtros de 'skip' ou 'check' para garantir que espelhe a lista da direita
+        if person != responsavel and person != proximo:
+            restante.append(person)
+        
+        idx = (idx + 1) % num_q
+# ------------------------------------------------
 
 with col_principal:
     st.header("Responsável pelo Bastão")
@@ -1014,10 +1018,19 @@ with col_principal:
     if skipped_consultants:
         skipped_text = ', '.join(sorted(skipped_consultants))
         num_skipped = len(skipped_consultants)
-        titulo = '**Consultor(a) Pulou:**' if num_skipped == 1 else '**Consultores(as) Pularam:**'
-        verbo_pular = 'pulou' if num_skipped == 1 else 'pularam'
-        verbo_retornar = 'Irá retornar' if num_skipped == 1 else 'Irão retornar'
-        st.markdown(f'''<div style="margin-top: 15px;"><span style="color: #FFC107; font-weight: bold;">{titulo}</span><br><span style="color: black; font-weight: normal;">{skipped_text} {verbo_pular} o bastão!</span><br><span style="color: black; font-weight: normal;">{verbo_retornar} no próximo ciclo!</span></div>''', unsafe_allow_html=True)
+        
+        # Ajuste do texto conforme pedido
+        lbl_consultor = 'Consultores' if num_skipped > 1 else 'Consultor(a)'
+        lbl_acao = 'acionaram' if num_skipped > 1 else 'acionou'
+        lbl_retorno = 'irão retornar' if num_skipped > 1 else 'irá retornar'
+
+        st.markdown(f'''
+        <div style="margin-top: 10px; padding: 10px; border-left: 5px solid #ff9800; background-color: #fff3e0;">
+            <span style="color: #e65100; font-weight: bold;">⚠️ {lbl_consultor} {lbl_acao} o botão pular:</span><br>
+            <span style="color: #333;"><strong>{skipped_text}</strong></span><br>
+            <span style="font-size: 0.9em; color: #555;">({lbl_retorno} na próxima rotação do bastão)</span>
+        </div>
+        ''', unsafe_allow_html=True)
 
     st.markdown("###")
     st.header("**Consultor(a)**")
@@ -1245,7 +1258,7 @@ with col_principal:
     st.markdown("""
     * [Notebook Lm Eproc Gabinete](https://notebooklm.google.com/notebook/e2fcf868-1697-4a4c-a7db-fed5560e04ad)
     * [Eproc Cartório](https://notebooklm.google.com/notebook/8b7fd5e6-ee33-4d5e-945c-f763c443846f)
-    * [Respostas Padrões e Atendimentos Cesupe](https://notebooklm.google.com/notebook/5504cfb6-174b-4cba-bbd4-ee22f45f60fe)
+    * [Respostas Padrão e Atendimentos Cesupe](https://notebooklm.google.com/notebook/5504cfb6-174b-4cba-bbd4-ee22f45f60fe)
     """)
 
 with col_disponibilidade:
