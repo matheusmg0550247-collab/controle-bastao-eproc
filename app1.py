@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # ============================================
 # 1. IMPORTS E DEFINIÇÕES GLOBAIS
 # ============================================
@@ -17,7 +18,7 @@ import os
 
 # --- Constantes de Consultores ---
 CONSULTORES = sorted([
-     "Alex Paulo",
+  "Alex Paulo",
 "Dirceu Gonçalves",
 "Douglas De Souza",
 "Farley Leandro",
@@ -76,7 +77,6 @@ SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxmQ76ojPpGdLot9fa
 
 # URL do Web App da Planilha
 SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyCV3jaGf5XnYfhHKNXt8ZylTSh2QGYsqnXvXzEvqf6C6l2o_7PpY8UaPx4r5QlE5u_EA/exec"
-
 
 REG_USUARIO_OPCOES = ["Cartório", "Gabinete", "Externo"]
 REG_SISTEMA_OPCOES = ["Conveniados", "Outros", "Eproc", "Themis", "JPE", "SIAP"]
@@ -430,6 +430,9 @@ def send_daily_report():
     st.session_state['bastao_counts'] = {nome: 0 for nome in CONSULTORES}
     save_state()
 
+# ============================================
+# [CORREÇÃO 1: init_session_state robusto]
+# ============================================
 def init_session_state():
     persisted_state = load_state()
     defaults = {
@@ -453,7 +456,6 @@ def init_session_state():
     st.session_state['simon_ranking'] = persisted_state.get('simon_ranking', [])
 
     now_br = get_brazil_time()
-    # [CORREÇÃO BUG TODOS DISPONÍVEIS] Garante consistência na inicialização
     for nome in CONSULTORES:
         st.session_state.bastao_counts.setdefault(nome, 0)
         st.session_state.skip_flags.setdefault(nome, False)
@@ -462,45 +464,49 @@ def init_session_state():
         if current_status is None: current_status = 'Indisponível'
         st.session_state.status_texto[nome] = current_status
         
-        # [MODIFICAÇÃO IMPORTANTE]: Lógica de disponibilidade
-        # Se NÃO tiver status de bloqueio, considera disponível (Checkbox = True)
-        # [ATUALIZAÇÃO] Adicionado "Treinamento" para garantir bloqueio correto
-        blocking_keywords = ['Indisponível', 'Almoço', 'Ausente', 'Saída rápida', 'Sessão', 'Reunião', 'Treinamento']
-        is_available = True
+        # [MODIFICAÇÃO] Lógica de Disponibilidade (Checkboxes)
+        # Prioriza quem já está na fila, a menos que tenha status de bloqueio
+        blocking_keywords = ['Almoço', 'Ausente', 'Saída rápida', 'Sessão', 'Reunião', 'Treinamento']
+        is_hard_blocked = any(kw in current_status for kw in blocking_keywords)
         
-        for kw in blocking_keywords:
-            if kw in current_status:
-                is_available = False
-                break
-        
-        # Override: Se estiver na fila de retorno prioritário, não está disponível para o bastão normal
-        if nome in st.session_state.priority_return_queue:
+        if is_hard_blocked:
             is_available = False
-            
-        # Override de segurança: Se tiver explicitamente "Bastão" no texto, deve estar disponível (embora raro com bloqueio)
-        if 'Bastão' in current_status:
+        elif nome in st.session_state.priority_return_queue:
+            is_available = False
+        # Se já está na fila e não tem bloqueio rígido, PRESERVA (Evita o bug de reset)
+        elif nome in st.session_state.bastao_queue:
             is_available = True
+        else:
+            is_available = 'Indisponível' not in current_status
 
         st.session_state[f'check_{nome}'] = is_available
         
         if nome not in st.session_state.current_status_starts: st.session_state.current_status_starts[nome] = now_br
 
-    checked_on = {c for c in CONSULTORES if st.session_state.get(f'check_{c}')}
-    if not st.session_state.bastao_queue and checked_on: st.session_state.bastao_queue = sorted(list(checked_on))
     check_and_assume_baton()
 
+# ============================================
+# [CORREÇÃO 2: find_next_holder_index com busca circular]
+# ============================================
 def find_next_holder_index(current_index, queue, skips):
     if not queue: return -1
-    num_consultores = len(queue)
-    if num_consultores == 0: return -1
-    if current_index >= num_consultores or current_index < -1: current_index = -1
-    next_idx = (current_index + 1) % num_consultores
-    attempts = 0
-    while attempts < num_consultores:
-        consultor = queue[next_idx]
-        if not skips.get(consultor, False) and st.session_state.get(f'check_{consultor}'): return next_idx
-        next_idx = (next_idx + 1) % num_consultores
-        attempts += 1
+    n = len(queue)
+    
+    # Começa a busca a partir da próxima posição (ou 0 se current_index for -1)
+    start_index = (current_index + 1) % n
+    
+    # Percorre a lista inteira uma vez (n vezes)
+    for i in range(n):
+        idx = (start_index + i) % n
+        consultor = queue[idx]
+        
+        # Critérios: Disponível (Check=True) E Não Pular
+        is_available = st.session_state.get(f'check_{consultor}', False)
+        is_skipping = skips.get(consultor, False)
+        
+        if is_available and not is_skipping:
+            return idx
+            
     return -1
 
 def check_and_assume_baton(forced_successor=None):
@@ -561,14 +567,16 @@ def check_and_assume_baton(forced_successor=None):
     if changed: save_state()
     return changed
 
+# ============================================
+# [CORREÇÃO 3: toggle_queue limpa flag de skip]
+# ============================================
 def toggle_queue(consultor):
     st.session_state.gif_warning = False; st.session_state.rotation_gif_start_time = None
     st.session_state.lunch_warning_info = None 
     now_br = get_brazil_time()
     
     if consultor in st.session_state.bastao_queue:
-        # [CORREÇÃO ROTAÇÃO] Antes de remover, verifique se é o atual dono do bastão
-        # e calcule quem deve ser o próximo sucessor a partir dele.
+        # SAINDO DA FILA
         current_holder = next((c for c, s in st.session_state.status_texto.items() if 'Bastão' in s), None)
         forced_successor = None
         
@@ -578,7 +586,6 @@ def toggle_queue(consultor):
             except ValueError: pass
             
             if current_idx != -1:
-                # Calcula o próximo antes de remover o atual da lista
                 next_idx = find_next_holder_index(current_idx, st.session_state.bastao_queue, st.session_state.skip_flags)
                 if next_idx != -1:
                     forced_successor = st.session_state.bastao_queue[next_idx]
@@ -586,7 +593,7 @@ def toggle_queue(consultor):
         st.session_state.bastao_queue.remove(consultor)
         st.session_state[f'check_{consultor}'] = False
         current_s = st.session_state.status_texto.get(consultor, '')
-        # Sai da fila mas mantém status de projeto/atividade se houver
+        
         if current_s == '' or current_s == 'Bastão':
             duration = now_br - st.session_state.current_status_starts.get(consultor, now_br)
             log_status_change(consultor, current_s, 'Indisponível', duration)
@@ -594,16 +601,24 @@ def toggle_queue(consultor):
             
         check_and_assume_baton(forced_successor=forced_successor)
     else:
+        # ENTRANDO NA FILA
         st.session_state.bastao_queue.append(consultor)
         st.session_state[f'check_{consultor}'] = True
-        st.session_state.skip_flags[consultor] = False
+        
+        # [MODIFICAÇÃO] Reseta flag de Pular ao entrar na fila
+        st.session_state.skip_flags[consultor] = False 
+        
         if consultor in st.session_state.priority_return_queue:
             st.session_state.priority_return_queue.remove(consultor)
+            
         current_s = st.session_state.status_texto.get(consultor, 'Indisponível')
-        if current_s == 'Indisponível':
+        
+        # Limpa o "Indisponível" visualmente
+        if 'Indisponível' in current_s:
             duration = now_br - st.session_state.current_status_starts.get(consultor, now_br)
-            log_status_change(consultor, 'Indisponível', '', duration)
+            log_status_change(consultor, current_s, '', duration)
             st.session_state.status_texto[consultor] = ''
+            
         check_and_assume_baton()
 
     save_state()
