@@ -645,7 +645,7 @@ def simon_game_ui():
 # ============================================
 # EXECUÇÃO PRINCIPAL
 # ============================================
-   
+    
 def toggle_skip():
     selected = st.session_state.consultor_selectbox
     if not selected or selected == 'Selecione um nome':
@@ -700,7 +700,7 @@ with c_topo_dir:
             if novo_responsavel != "Selecione": toggle_queue(novo_responsavel); st.rerun()
 
 st.markdown("<hr style='border: 1px solid #FFD700; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
-st_autorefresh(interval=8000, key='auto_rerun')
+st_autorefresh(interval=60000, key='auto_rerun')
 
 col_principal, col_disponibilidade = st.columns([1.5, 1])
 queue, skips = st.session_state.bastao_queue, st.session_state.skip_flags
@@ -718,7 +718,28 @@ with col_principal:
     else: st.markdown('<h2>(Ninguém com o bastão)</h2>', unsafe_allow_html=True)
     
     st.markdown("###"); st.header("Próximos da Fila")
-    if proximo: st.markdown(f'### 1º: **{proximo}**')
+    
+    if responsavel and responsavel in queue:
+        c_idx = queue.index(responsavel)
+        # Cria lista ordenada começando pelo próximo após o responsável
+        ordered_queue = queue[c_idx+1:] + queue[:c_idx]
+
+        if not ordered_queue:
+            st.markdown("_Apenas o titular na fila._")
+        else:
+            for i, nome_fila in enumerate(ordered_queue, start=1):
+                # Marcação visual de skip
+                is_skipped = skips.get(nome_fila, False)
+                skip_icon = " ⏭️ (Pular)" if is_skipped else ""
+                st.markdown(f'##### {i}º: **{nome_fila}**{skip_icon}')
+    elif queue:
+         # Caso responsável não esteja na fila ou indefinido, mostra fila pura
+         for i, nome_fila in enumerate(queue, start=1):
+             is_skipped = skips.get(nome_fila, False)
+             skip_icon = " ⏭️ (Pular)" if is_skipped else ""
+             st.markdown(f'##### {i}º: **{nome_fila}**{skip_icon}')
+    else:
+        st.markdown("_Fila vazia._")
     
     st.markdown("###"); st.header("**Consultor(a)**")
     st.selectbox('Selecione:', ['Selecione um nome'] + CONSULTORES, key='consultor_selectbox', label_visibility='collapsed')
