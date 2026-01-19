@@ -23,9 +23,9 @@ from utils import (get_brazil_time, get_secret, send_to_chat, get_img_as_base64)
 # 1. CONFIGURAÇÕES
 # ============================================
 CONSULTORES = sorted([
-      "Alex Paulo", "Dirceu Gonçalves", "Douglas De Souza", "Farley Leandro", "Gleis Da Silva", 
-    "Hugo Leonardo", "Igor Dayrell", "Jerry Marcos", "Jonatas Gomes", "Leandro Victor", 
-    "Luiz Henrique", "Marcelo Dos Santos", "Marina Silva", "Marina Torres", "Vanessa Ligiane"
+    "Barbara Mara", "Bruno Glaicon", "Claudia Luiza", "Douglas Paiva", "Fábio Alves", "Glayce Torres",
+    "Isabela Dias", "Isac Candido", "Ivana Guimarães", "Leonardo Damaceno", "Marcelo PenaGuerra",
+    "Michael Douglas", "Morôni", "Pablo Mol", "Ranyer Segal", "Sarah Leal", "Victoria Lisboa"
 ])
 
 REG_USUARIO_OPCOES = ["Cartório", "Gabinete", "Externo"]
@@ -72,6 +72,63 @@ def get_supabase():
         return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
     except Exception:
         return None
+
+
+# --- RESUMOS (JSONB) NO SUPABASE ---
+def fetch_atendimentos_resumo_por_nivel(nivel: str):
+    """Busca o último resumo na tabela `atendimentos_resumo` filtrando por nível (ex.: 'operacional' / 'gerencial')."""
+    sb = get_supabase()
+    if not sb:
+        return None
+    try:
+        resp = (
+            sb.table("atendimentos_resumo")
+            .select("id,nivel,data,created_at,updated_at")
+            .eq("nivel", nivel)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if resp and getattr(resp, "data", None):
+            return resp.data[0]
+    except Exception as e:
+        print(f"Erro ao buscar atendimentos_resumo({nivel}): {e}")
+    return None
+
+
+def montar_df_totais_relatorios(payload: dict) -> pd.DataFrame:
+    """Monta um DataFrame com totais por relatório (Chat / HP / Atendimentos etc)."""
+    rels = (payload or {}).get("relatorios", []) or []
+    rows = []
+
+    for r in rels:
+        nome = r.get("nome") or "(Sem nome)"
+        te = r.get("totais_equipes") or {}
+        eproc = int(te.get("Eproc", 0) or 0)
+        legados = int(te.get("Legados", 0) or 0)
+        total = eproc + legados
+
+        # Observações (se existirem nos destaques)
+        obs_list = []
+        for d in (r.get("destaques") or []):
+            if isinstance(d, dict) and d.get("obs"):
+                obs_list.append(str(d.get("obs")))
+        obs = " | ".join(dict.fromkeys(obs_list))
+
+        rows.append(
+            {
+                "Relatório": nome,
+                "Legados": legados,
+                "Eproc": eproc,
+                "Total": total,
+                "Obs": obs,
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values(by=["Total", "Relatório"], ascending=[False, True])
+    return df
 
 # --- FUNÇÕES DE BANCO PARA CERTIDÕES ---
 def verificar_duplicidade_certidao(tipo, n_processo=None, data_evento=None, hora_periodo=None):
@@ -971,27 +1028,37 @@ def toggle_skip():
 
 st.set_page_config(page_title="Controle Bastão Cesupe 2026", layout="wide", page_icon="🥂")
 
-# --- Ajuste visual: botões sempre proporcionais e na mesma linha ---
+# --- Ajuste visual: botões sempre proporcionais e nivelados ---
 st.markdown(
     """
 <style>
-  div.stButton > button {
-    width: 100%;
-    white-space: nowrap;
-    height: 3rem;
-  }
-</style>
-""",
-    unsafe_allow_html=True,
-)
+/* 1) Botões do Streamlit (garante mesma altura e não quebra linha) */
+div.stButton > button,
+[data-testid="stButton"] > button {
+  width: 100% !important;
+  height: 3rem !important;
+  min-height: 3rem !important;
+  max-height: 3rem !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: .35rem !important;
+  line-height: 1 !important;
+  padding: 0 .75rem !important;
+}
 
-st.markdown(
-    """
-<style>
-/* Mantém os botões dos atalhos (Checklist/Chamados/...) alinhados e proporcionais */
+/* 2) Em blocos horizontais/colunas, mantém tudo alinhado */
 [data-testid='stHorizontalBlock'] div.stButton > button {
-  white-space: nowrap;
-  height: 3rem;
+  height: 3rem !important;
+}
+
+/* 3) Evita botão “crescer” por quebra de texto */
+div.stButton > button p {
+  margin: 0 !important;
+  white-space: nowrap !important;
 }
 </style>
 """,
@@ -1033,16 +1100,6 @@ with c_topo_dir:
                 toggle_queue(novo_responsavel)
                 st.rerun()
 
-    # --- Destaque: Dados completos ---
-    st.markdown(
-        f"""
-<div style="margin-top: 10px; padding: 12px 14px; border-radius: 12px; border: 2px solid #FFD700; background: linear-gradient(135deg, #FFF8DC 0%, #FFFFFF 100%); box-shadow: 0 4px 12px rgba(255, 215, 0, 0.25);">
-  <div style="font-weight: 800; color: #000080; margin-bottom: 6px;">📊 Dados completos</div>
-  <a href="{LOOKER_DADOS_COMPLETOS_URL}" target="_blank" style="display: inline-block; font-weight: 700; color: #0b5ed7; text-decoration: none;">Abrir relatório no Looker Studio ↗</a>
-</div>
-""",
-        unsafe_allow_html=True,
-    )
 
 st.markdown("<hr style='border: 1px solid #FFD700; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
@@ -1262,6 +1319,35 @@ with col_principal:
         with st.container(border=True):
             st.header("🧾 Operacional")
             st.caption("Registre o operacional do dia separado por tipo. (Envio via canal de registros)")
+
+            # --- Resumo do operacional (carregado do Supabase) ---
+            resumo_row = fetch_atendimentos_resumo_por_nivel("operacional")
+            if resumo_row and isinstance(resumo_row, dict):
+                payload = resumo_row.get("data") or {}
+                df_resumo = build_operacional_resumo_df(payload)
+
+                st.subheader("📊 Resumo Operacional (Supabase)")
+                st.caption(
+                    "Totais consolidados por fonte (Chat / HP / Atendimentos). "
+                    "Equipes: **Eproc** e **Legados**."
+                )
+                if df_resumo is not None and not df_resumo.empty:
+                    st.dataframe(df_resumo, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Resumo operacional encontrado, mas sem relatorios preenchidos.")
+
+                meta_fonte = payload.get("fonte") or "-"
+                meta_gerado = payload.get("gerado_em") or "-"
+                meta_upd = resumo_row.get("updated_at") or resumo_row.get("created_at") or "-"
+                st.caption(f"Fonte: **{meta_fonte}** | Gerado em: **{meta_gerado}** | Atualização no Supabase: **{meta_upd}**")
+
+                # Link deve ficar ABAIXO das infos operacionais
+                st.markdown(f"📈 **Dados completos:** [Abrir relatorio no Looker Studio ↗]({LOOKER_DADOS_COMPLETOS_URL})")
+                st.markdown("---")
+            else:
+                st.info("Resumo operacional ainda não localizado no Supabase (tabela `atendimentos_resumo`, nivel='operacional').")
+                st.markdown(f"📈 **Dados completos:** [Abrir relatorio no Looker Studio ↗]({LOOKER_DADOS_COMPLETOS_URL})")
+                st.markdown("---")
 
             t_chat, t_hp, t_atend = st.tabs(["💬 Chat", "🩺 HP", "📝 Atendimentos"])
 
@@ -1693,8 +1779,3 @@ with col_disponibilidade:
     _render_section_simples('Saída rápida', '🚶', ui_lists['saida'], 'red')
     _render_section_simples('Ausente', '👤', ui_lists['ausente'], 'violet')
     _render_section_simples('Indisponível', '❌', ui_lists['indisponivel'], 'grey')
-
-
-
-
-
