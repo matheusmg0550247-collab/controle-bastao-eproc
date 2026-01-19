@@ -10,6 +10,7 @@ import json
 import re
 import base64
 import io
+import altair as alt  # <--- NOVA IMPORTAÇÃO
 from supabase import create_client
 from docx import Document
 from docx.shared import Pt, Cm
@@ -1067,7 +1068,6 @@ with col_principal:
                 if st.button("Ciente"): st.session_state.aviso_duplicidade = False; st.rerun()
 
     # --- INICIO NOVO BLOCO DE DASHBOARD ---
-    # Só renderiza se não estiver em nenhuma view específica
     if st.session_state.active_view is None:
         dashboard_data = get_dashboard_data_from_db()
         if dashboard_data:
@@ -1079,12 +1079,32 @@ with col_principal:
                 items = dashboard_data.get('totais_por_relatorio', [])
                 if items:
                     df = pd.DataFrame(items)
-                    # Gráfico de barras agrupado (Eproc vs Legados) por Relatório
+                    # Gráfico Altair com Data Labels e Eixo X Horizontal
                     if not df.empty and 'relatorio' in df.columns:
                         st.subheader("Totais por Relatório")
-                        # Prepara dados para gráfico simples do Streamlit
-                        chart_data = df.set_index('relatorio')[['Eproc', 'Legados']]
-                        st.bar_chart(chart_data)
+                        
+                        # Transforma para formato longo (long format) para o Altair empilhar
+                        df_melted = df.melt(id_vars=['relatorio'], value_vars=['Eproc', 'Legados'], var_name='Tipo', value_name='Total')
+                        
+                        # Gráfico de barras
+                        bars = alt.Chart(df_melted).mark_bar().encode(
+                            x=alt.X('relatorio', axis=alt.Axis(title=None, labelAngle=0)), # Eixo X horizontal
+                            y=alt.Y('Total', axis=alt.Axis(title='Quantidade')),
+                            color=alt.Color('Tipo', legend=alt.Legend(title="Sistema"), scale=alt.Scale(domain=['Eproc', 'Legados'], range=['#1f77b4', '#aec7e8']))
+                        )
+
+                        # Rótulos de dados (números nas barras)
+                        text = bars.mark_text(
+                            align='center',
+                            baseline='middle',
+                            dy=0,  # Ajuste vertical
+                            color='white' # Cor do texto
+                        ).encode(
+                            text='Total'
+                        )
+
+                        # Renderiza o gráfico composto
+                        st.altair_chart((bars + text).properties(height=350), use_container_width=True)
                         
                         # Exibir métricas abaixo do gráfico
                         cols = st.columns(len(items))
