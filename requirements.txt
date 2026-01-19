@@ -1,4 +1,8 @@
 streamlit
 pandas
 requests
+plotly
 streamlit-autorefresh
+supabase
+pytz
+python-docx
