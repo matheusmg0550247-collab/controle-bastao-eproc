@@ -516,6 +516,17 @@ def rotate_bastao():
     next_idx = find_next_holder_index(current_index, queue, skips)
     if next_idx == -1 and len(queue) > 1: next_idx = (current_index + 1) % len(queue)
     if next_idx != -1:
+        # --- CORREÇÃO: Limpar flag 'Pular' de quem foi pulado ---
+        n_queue = len(queue)
+        tmp_idx = (current_index + 1) % n_queue
+        # Percorre do atual até o novo dono. Quem estiver no caminho, foi pulado.
+        while tmp_idx != next_idx:
+            skipped_name = queue[tmp_idx]
+            if st.session_state.skip_flags.get(skipped_name, False):
+                st.session_state.skip_flags[skipped_name] = False
+            tmp_idx = (tmp_idx + 1) % n_queue
+        # --------------------------------------------------------
+
         next_holder = queue[next_idx]
         st.session_state.skip_flags[next_holder] = False
         now_br = get_brazil_time()
@@ -656,9 +667,9 @@ def toggle_skip():
         return
     novo = not st.session_state.skip_flags.get(selected, False)
     st.session_state.skip_flags[selected] = novo
-    if novo and selected in st.session_state.bastao_queue:
-        st.session_state.bastao_queue.remove(selected)
-        st.session_state.bastao_queue.append(selected)
+    # --- CORREÇÃO: Pular mantém o lugar na fila (não move pro final) ---
+    # Apenas marca a flag, sem reordenar a lista.
+    # -------------------------------------------------------------------
     save_state()
     st.rerun()
 st.set_page_config(page_title="Controle Bastão Cesupe 2026", layout="wide", page_icon="🥂")
@@ -700,7 +711,18 @@ with c_topo_dir:
             if novo_responsavel != "Selecione": toggle_queue(novo_responsavel); st.rerun()
 
 st.markdown("<hr style='border: 1px solid #FFD700; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
-st_autorefresh(interval=60000, key='auto_rerun')
+
+# ---------------------------------------------------------
+# LÓGICA DE ATUALIZAÇÃO AUTOMÁTICA (REFRESH)
+# ---------------------------------------------------------
+# Se não estiver em nenhuma "view" de registro (active_view == None), atualiza a cada 20 segundos.
+# Caso contrário, pausa para não atrapalhar a digitação.
+if st.session_state.active_view is None:
+    st_autorefresh(interval=20000, key='auto_rerun')
+else:
+    # Opcional: Mostra um aviso discreto de que a atualização está pausada
+    st.caption("⏸️ Atualização automática pausada durante o registro.")
+
 
 col_principal, col_disponibilidade = st.columns([1.5, 1])
 queue, skips = st.session_state.bastao_queue, st.session_state.skip_flags
