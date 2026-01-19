@@ -58,14 +58,9 @@ GIF_URL_NEDRY = 'https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExMGNkMGx3YnNkc
 SOUND_URL = "https://github.com/matheusmg0550247-collab/controle-bastao-eproc2/raw/main/doorbell-223669.mp3"
 PUG2026_FILENAME = "pug2026.png"
 
-GOOGLE_CHAT_WEBHOOK_BACKUP        = get_secret("chat", "backup")
-CHAT_WEBHOOK_BASTAO               = get_secret("chat", "bastao")
-GOOGLE_CHAT_WEBHOOK_REGISTRO      = get_secret("chat", "registro")
-GOOGLE_CHAT_WEBHOOK_CHAMADO       = get_secret("chat", "chamado")
-GOOGLE_CHAT_WEBHOOK_SESSAO        = get_secret("chat", "sessao")
-GOOGLE_CHAT_WEBHOOK_CHECKLIST_HTML= get_secret("chat", "checklist")
-GOOGLE_CHAT_WEBHOOK_HORAS_EXTRAS  = get_secret("chat", "extras")
-GOOGLE_CHAT_WEBHOOK_ERRO_NOVIDADE = get_secret("chat", "erro")
+GOOGLE_CHAT_WEBHOOK_BACKUP = get_secret("chat", "backup")
+CHAT_WEBHOOK_BASTAO = get_secret("chat", "bastao")
+GOOGLE_CHAT_WEBHOOK_REGISTRO = get_secret("chat", "registro")
 
 # --- CONEXÃO COM SUPABASE ---
 def get_supabase():
@@ -127,7 +122,7 @@ def gerar_docx_certidao_internal(tipo, numero, data, consultor, motivo, chamado=
         head_p.add_run("Rua Ouro Preto, N° 1564 - Bairro Santo Agostinho - CEP 30170-041 - Belo Horizonte - MG\nwww.tjmg.jus.br - Andar: 3º e 4º PV")
         
         doc.add_paragraph("\n")
-        p_num = doc.add_paragraph(f"Parecer Técnico GEJUD/DIRTEC/TJMG nº ____/2026.")
+        p_num = doc.add_paragraph(f"Parecer Técnico GEJUD/DIRTEC/TJMG nº ____/2025.")
         p_num.runs[0].bold = True
         doc.add_paragraph("Assunto: Notifica erro no \"JPe - 2ª Instância\" ao peticionar.")
         
@@ -189,11 +184,6 @@ def _send_webhook_sync(url, payload):
     try: requests.post(url, json=payload, headers={'Content-Type': 'application/json'}, timeout=3)
     except: pass
 
-def send_log_to_sheets(timestamp_str, consultor, old_status, new_status, duration_str):
-    if not SHEETS_WEBHOOK_URL: return
-    payload = {"data_hora": timestamp_str, "consultor": consultor, "status_anterior": old_status, "status_atual": new_status, "tempo_anterior": duration_str}
-    _send_webhook_sync(SHEETS_WEBHOOK_URL, payload)
-
 def log_status_change(consultor, old_status, new_status, duration):
     if not isinstance(duration, timedelta): duration = timedelta(0)
     now_br = get_brazil_time()
@@ -205,7 +195,6 @@ def log_status_change(consultor, old_status, new_status, duration):
     st.session_state.daily_logs.append(entry)
     timestamp_str = now_br.strftime("%d/%m/%Y %H:%M:%S")
     duration_str = format_time_duration(duration)
-    send_log_to_sheets(timestamp_str, consultor, old_lbl, new_lbl, duration_str)
     st.session_state.current_status_starts[consultor] = now_br
 
 # --- HANDLERS ---
