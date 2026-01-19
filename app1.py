@@ -719,27 +719,43 @@ with col_principal:
     
     st.markdown("###"); st.header("Próximos da Fila")
     
+    # --- Nova Lógica de Exibição Horizontal ---
+    
+    # 1. Identificar quem pulou (que esteja na fila)
+    lista_pularam = [n for n in queue if skips.get(n, False) and n != responsavel]
+
+    # 2. Montar a fila ordenada para exibir "Demais"
+    demais_na_fila = []
+    # Se existe responsável na fila, rotacionamos para começar depois dele
     if responsavel and responsavel in queue:
         c_idx = queue.index(responsavel)
-        # Cria lista ordenada começando pelo próximo após o responsável
-        ordered_queue = queue[c_idx+1:] + queue[:c_idx]
-
-        if not ordered_queue:
-            st.markdown("_Apenas o titular na fila._")
-        else:
-            for i, nome_fila in enumerate(ordered_queue, start=1):
-                # Marcação visual de skip
-                is_skipped = skips.get(nome_fila, False)
-                skip_icon = " ⏭️ (Pular)" if is_skipped else ""
-                st.markdown(f'##### {i}º: **{nome_fila}**{skip_icon}')
-    elif queue:
-         # Caso responsável não esteja na fila ou indefinido, mostra fila pura
-         for i, nome_fila in enumerate(queue, start=1):
-             is_skipped = skips.get(nome_fila, False)
-             skip_icon = " ⏭️ (Pular)" if is_skipped else ""
-             st.markdown(f'##### {i}º: **{nome_fila}**{skip_icon}')
+        raw_ordered = queue[c_idx+1:] + queue[:c_idx]
     else:
-        st.markdown("_Fila vazia._")
+        # Se não tem responsável (ou ele não tá na fila), mostra a fila como está
+        raw_ordered = list(queue)
+
+    for n in raw_ordered:
+        # Filtra: não pode ser o próximo, não pode ter pulado
+        if n != proximo and not skips.get(n, False):
+            demais_na_fila.append(n)
+
+    # Exibição: Próximo Bastão
+    if proximo:
+        st.markdown(f"**Próximo Bastão:** {proximo}")
+    else:
+        st.markdown("**Próximo Bastão:** _Ninguém elegível_")
+
+    # Exibição: Demais na fila
+    if demais_na_fila:
+        st.markdown(f"**Demais na fila:** {', '.join(demais_na_fila)}")
+    else:
+        st.markdown("**Demais na fila:** _Vazio_")
+
+    # Exibição: Quem pulou
+    if lista_pularam:
+        st.markdown(f"**Consultor(es) pulou(pularam) o bastão:** {', '.join(lista_pularam)}")
+
+    # --- Fim Nova Lógica ---
     
     st.markdown("###"); st.header("**Consultor(a)**")
     st.selectbox('Selecione:', ['Selecione um nome'] + CONSULTORES, key='consultor_selectbox', label_visibility='collapsed')
