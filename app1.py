@@ -180,7 +180,43 @@ def format_time_duration(duration):
     s = int(duration.total_seconds()); h, s = divmod(s, 3600); m, s = divmod(s, 60)
     return f'{h:02}:{m:02}:{s:02}'
 
+# --- FUNÇÃO CRÍTICA: SINCRONIZAR COM BD NO REFRESH ---
+def sync_state_from_db():
+    try:
+        # Se estivermos digitando (active_view não é None), EVITA sobrescrever para não perder dados.
+        # Mas o autorefresh já bloqueia isso. Se chegamos aqui, podemos sincronizar.
+        db_data = load_state_from_db()
+        if not db_data: return
 
+        # Lista de chaves críticas para atualizar
+        keys = ['status_texto', 'bastao_queue', 'skip_flags', 'bastao_counts', 
+                'priority_return_queue', 'daily_logs', 'simon_ranking']
+        
+        for k in keys:
+            if k in db_data:
+                st.session_state[k] = db_data[k]
+        
+        # Tratamento especial para DATAS (str -> datetime)
+        if 'bastao_start_time' in db_data and db_data['bastao_start_time']:
+            try:
+                if isinstance(db_data['bastao_start_time'], str):
+                    st.session_state['bastao_start_time'] = datetime.fromisoformat(db_data['bastao_start_time'])
+                else:
+                    st.session_state['bastao_start_time'] = db_data['bastao_start_time']
+            except: pass
+            
+        if 'current_status_starts' in db_data:
+            starts = db_data['current_status_starts']
+            for nome, val in starts.items():
+                if isinstance(val, str):
+                    try:
+                        st.session_state.current_status_starts[nome] = datetime.fromisoformat(val)
+                    except: pass
+                else:
+                     st.session_state.current_status_starts[nome] = val
+
+    except Exception as e:
+        print(f"Erro sync: {e}")
 
 def log_status_change(consultor, old_status, new_status, duration):
     if not isinstance(duration, timedelta): duration = timedelta(0)
@@ -713,12 +749,14 @@ with c_topo_dir:
 st.markdown("<hr style='border: 1px solid #FFD700; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# LÓGICA DE ATUALIZAÇÃO AUTOMÁTICA (REFRESH)
+# LÓGICA DE ATUALIZAÇÃO AUTOMÁTICA (REFRESH + SYNC)
 # ---------------------------------------------------------
 # Se não estiver em nenhuma "view" de registro (active_view == None), atualiza a cada 20 segundos.
 # Caso contrário, pausa para não atrapalhar a digitação.
 if st.session_state.active_view is None:
     st_autorefresh(interval=20000, key='auto_rerun')
+    # --- NOVO: Sincroniza dados do banco para que User B veja mudanças de User A ---
+    sync_state_from_db() 
 else:
     # Opcional: Mostra um aviso discreto de que a atualização está pausada
     st.caption("⏸️ Atualização automática pausada durante o registro.")
