@@ -69,6 +69,19 @@ def get_supabase():
     except:
         return None
 
+# --- FUNÇÃO PARA BUSCAR DADOS DO DASHBOARD ---
+def get_dashboard_data_from_db():
+    sb = get_supabase()
+    if not sb: return None
+    try:
+        # Busca o registro com id=2 (Operacional)
+        response = sb.table("atendimentos_resumo").select("data").eq("id", 2).execute()
+        if response.data and len(response.data) > 0:
+            return response.data[0]['data']
+    except Exception as e:
+        print(f"Erro dashboard: {e}")
+    return None
+
 # --- FUNÇÕES DE BANCO PARA CERTIDÕES ---
 def verificar_duplicidade_certidao(tipo, n_processo=None, data_evento=None, hora_periodo=None):
     sb = get_supabase()
@@ -1052,6 +1065,33 @@ with col_principal:
             if st.session_state.get('aviso_duplicidade'):
                 st.error("⚠️ ATENÇÃO: Registro já existe! Favor procurar Matheus ou Gilberto.")
                 if st.button("Ciente"): st.session_state.aviso_duplicidade = False; st.rerun()
+
+    # --- INICIO NOVO BLOCO DE DASHBOARD ---
+    # Só renderiza se não estiver em nenhuma view específica
+    if st.session_state.active_view is None:
+        dashboard_data = get_dashboard_data_from_db()
+        if dashboard_data:
+            st.markdown("---")
+            with st.container(border=True):
+                st.markdown("### 📊 Painel Gerencial (Resumo)")
+                st.link_button("🔗 Acessar Relatório Completo (Looker Studio)", "https://lookerstudio.google.com/reporting/8adc4cf8-94f6-4333-b808-4a300151af09", type="primary", use_container_width=True)
+                
+                items = dashboard_data.get('totais_por_relatorio', [])
+                if items:
+                    df = pd.DataFrame(items)
+                    # Gráfico de barras agrupado (Eproc vs Legados) por Relatório
+                    if not df.empty and 'relatorio' in df.columns:
+                        st.subheader("Totais por Relatório")
+                        # Prepara dados para gráfico simples do Streamlit
+                        chart_data = df.set_index('relatorio')[['Eproc', 'Legados']]
+                        st.bar_chart(chart_data)
+                        
+                        # Exibir métricas abaixo do gráfico
+                        cols = st.columns(len(items))
+                        for i, row in df.iterrows():
+                            with cols[i % 3]:
+                                st.metric(label=row['relatorio'], value=row['total_geral'], delta=f"Eproc: {row['Eproc']} | Legados: {row['Legados']}")
+    # --- FIM NOVO BLOCO DE DASHBOARD ---
 
 with col_disponibilidade:
     st.header('Status dos(as) Consultores(as)')
