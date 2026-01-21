@@ -4,5 +4,6 @@ requests
 plotly
 streamlit-autorefresh
 supabase
-pytz
+altair
 python-docx
+pytz
