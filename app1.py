@@ -27,6 +27,7 @@ CONSULTORES = sorted([
     "Alex Paulo", "Dirceu Gonçalves", "Douglas De Souza", "Farley Leandro", "Gleis Da Silva", 
     "Hugo Leonardo", "Igor Dayrell", "Jerry Marcos", "Jonatas Gomes", "Leandro Victor", 
     "Luiz Henrique", "Marcelo Dos Santos", "Marina Silva", "Marina Torres", "Vanessa Ligiane"
+])
 
 # --- LISTAS DE OPÇÕES (ESSENCIAIS PARA O MENU DE ATENDIMENTO) ---
 REG_USUARIO_OPCOES = ["Cartório", "Gabinete", "Externo"]
