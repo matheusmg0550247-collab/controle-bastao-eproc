@@ -16,7 +16,7 @@ from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-# Importações locais (Certifique-se que repository.py e utils.py estão na mesma pasta)
+# Importações locais
 from repository import load_state_from_db, save_state_to_db
 from utils import (get_brazil_time, get_secret, send_to_chat, get_img_as_base64)
 
@@ -29,7 +29,7 @@ CONSULTORES = sorted([
     "Luiz Henrique", "Marcelo Dos Santos", "Marina Silva", "Marina Torres", "Vanessa Ligiane"
 ])
 
-# --- LISTAS DE OPÇÕES (ESSENCIAIS PARA O MENU DE ATENDIMENTO) ---
+# --- LISTAS DE OPÇÕES ---
 REG_USUARIO_OPCOES = ["Cartório", "Gabinete", "Externo"]
 REG_SISTEMA_OPCOES = ["Conveniados", "Outros", "Eproc", "Themis", "JPE", "SIAP"]
 REG_CANAL_OPCOES = ["Presencial", "Telefone", "Email", "Whatsapp", "Outros"]
@@ -50,7 +50,7 @@ CAMARAS_DICT = {
 }
 CAMARAS_OPCOES = sorted(list(CAMARAS_DICT.keys()))
 OPCOES_ATIVIDADES_STATUS = ["HP", "E-mail", "WhatsApp Plantão", "Homologação", "Redação Documentos", "Outros"]
-OPCOES_PROJETOS = ["Soma", "Treinamentos Eproc", "Manuais Eproc", "Cartilhas Gabinetes", "Notebook Lm", "Inteligência artifical cartórios"]
+OPCOES_PROJETOS = ["Soma", "Treinamentos Eproc", "Manuais Eproc", "Cartilhas Gabinetes", "Notebook Lm", "Inteligência artifical cartórios", "Projeto Aura"]
 
 GIF_BASTAO_HOLDER = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExa3Uwazd5cnNra2oxdDkydjZkcHdqcWN2cng0Y2N0cmNmN21vYXVzMiZlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/3rXs5J0hZkXwTZjuvM/giphy.gif"
 BASTAO_EMOJI = "🥂" 
@@ -63,6 +63,22 @@ CHAT_WEBHOOK_BASTAO = get_secret("chat", "bastao")
 def get_supabase():
     try: return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
     except: return None
+
+# --- FUNÇÃO NOVA DE IP ---
+def get_remote_ip():
+    try:
+        from streamlit.web.server.websocket_headers import ClientWebSocketRequest
+        ctx = st.runtime.scriptrunner.get_script_run_ctx()
+        if ctx and ctx.session_id:
+            session_info = st.runtime.get_instance().get_client(ctx.session_id)
+            if session_info:
+                request = session_info.request
+                if isinstance(request, ClientWebSocketRequest):
+                    if 'X-Forwarded-For' in request.headers:
+                        return request.headers['X-Forwarded-For'].split(',')[0]
+                    return request.remote_ip
+    except: return "Unknown"
+    return "Unknown"
 
 # --- LÓGICA DE FILA VISUAL ---
 def get_ordered_visual_queue(queue, status_dict):
@@ -111,29 +127,50 @@ def gerar_docx_certidao_internal(tipo, numero, data, consultor, motivo, chamado=
         section.top_margin = Cm(2.5); section.bottom_margin = Cm(2.0)
         section.left_margin = Cm(3.0); section.right_margin = Cm(3.0)
         style = doc.styles['Normal']; style.font.name = 'Arial'; style.font.size = Pt(11)
+        
+        # Cabeçalho
         head_p = doc.add_paragraph(); head_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         runner = head_p.add_run("TRIBUNAL DE JUSTIÇA DO ESTADO DE MINAS GERAIS\n")
         runner.bold = True
         head_p.add_run("Rua Ouro Preto, N° 1564 - Bairro Santo Agostinho - CEP 30170-041 - Belo Horizonte - MG\nwww.tjmg.jus.br - Andar: 3º e 4º PV")
         doc.add_paragraph("\n")
-        p_num = doc.add_paragraph(f"Parecer Técnico GEJUD/DIRTEC/TJMG nº ____/2025.")
+        
+        # Assunto Padrão (2026)
+        if tipo == 'Geral':
+            p_num = doc.add_paragraph(f"Parecer GEJUD/DIRTEC/TJMG nº ____/2026.")
+        else:
+            p_num = doc.add_paragraph(f"Parecer Técnico GEJUD/DIRTEC/TJMG nº ____/2026.")
         p_num.runs[0].bold = True
-        doc.add_paragraph("Assunto: Notifica erro no \"JPe - 2ª Instância\" ao peticionar.")
-        data_atual = datetime.now().strftime("%d de %B de %Y")
-        doc.add_paragraph(f"\nExmo(a). Senhor(a) Relator(a),\n\nBelo Horizonte, {data_atual}")
+        
+        if tipo == 'Geral':
+             doc.add_paragraph("Assunto: Notifica erro no \"JPe – 2ª Instância\" ao peticionar")
+        else:
+             doc.add_paragraph("Assunto: Notifica erro no \"JPe – 2ª Instância\" ao peticionar.")
+             
+        doc.add_paragraph(f"\nExmo(a). Senhor(a) Relator(a),\n")
+        
         corpo = doc.add_paragraph(); corpo.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        
         if tipo == 'Geral':
             txt = (f"Para fins de cumprimento dos artigos 13 e 14 da Resolução nº 780/2014 do Tribunal de Justiça do Estado de Minas Gerais, "
                    f"informamos que em {data} houve indisponibilidade do portal JPe, superior a uma hora, {hora}, que impossibilitou o peticionamento eletrônico de recursos em processos que já tramitavam no sistema.")
             corpo.add_run(txt)
-        else:
+            doc.add_paragraph("\nColocamo-nos à disposição para outras que se fizerem necessárias.")
+            
+        elif tipo == 'Eletrônica':
+            corpo.add_run(f"Informamos que de {data}, houve indisponibilidade específica do sistema para o peticionamento do processo nº {numero}.\n\n")
+            corpo.add_run(f"O Chamado de número {chamado if chamado else '_____'}, foi aberto e encaminhado à DIRTEC (Diretoria Executiva de Tecnologia da Informação e Comunicação).\n\n")
+            corpo.add_run("Esperamos ter prestado as informações solicitadas e colocamo-nos à disposição para outras que se fizerem necessárias.")
+
+        elif tipo == 'Física':
             corpo.add_run(f"Informamos que no dia {data}, houve indisponibilidade específica do sistema para o peticionamento do processo nº {numero}.\n\n")
             corpo.add_run(f"O Chamado de número {chamado if chamado else '_____'}, foi aberto e encaminhado à DIRTEC (Diretoria Executiva de Tecnologia da Informação e Comunicação).\n\n")
-            if tipo == 'Física': corpo.add_run("Diante da indisponibilidade específica, não havendo um prazo para solução do problema, a Primeira Vice-Presidência recomenda o ingresso dos autos físicos, nos termos do § 2º, do artigo 14º, da Resolução nº 780/2014, do Tribunal de Justiça do Estado de Minas Gerais.\n\n")
-            else: corpo.add_run("Informamos a indisponibilidade para fins de restituição de prazo ou providências que V.Exa julgar necessárias, nos termos da legislação vigente.\n\n")
-        corpo.add_run("\nColocamo-nos à disposição para outras informações que se fizerem necessárias.")
+            corpo.add_run("Diante da indisponibilidade específica, não havendo um prazo para solução do problema, a Primeira Vice-Presidência recomenda o ingresso dos autos físicos, nos termos do § 2º, do artigo 14º, da Resolução nº 780/2014, do Tribunal de Justiça do Estado de Minas Gerais.")
+            doc.add_paragraph("\nColocamo-nos à disposição para outras informações que se fizerem necessárias.")
+
         doc.add_paragraph("\nRespeitosamente,")
         doc.add_paragraph("\n\n___________________________________\nWaner Andrade Silva\n0-009020-9\nCoordenação de Análise e Integração de Sistemas Judiciais Informatizados - COJIN\nGerência de Sistemas Judiciais - GEJUD\nDiretoria Executiva de Tecnologia da Informação e Comunicação - DIRTEC")
+        
         buffer = io.BytesIO(); doc.save(buffer); buffer.seek(0)
         return buffer
     except: return None
@@ -177,6 +214,13 @@ def handle_erro_novidade_submission(consultor, titulo, objetivo, relato, resulta
 def send_sessao_to_chat_fn(consultor, texto_mensagem):
     if not consultor or consultor == 'Selecione um nome': return False
     try: send_to_chat("sessao", texto_mensagem); return True
+    except: return False
+
+def handle_sugestao_submission(consultor, texto):
+    data_envio = get_brazil_time().strftime("%d/%m/%Y %H:%M")
+    ip_usuario = get_remote_ip()
+    msg = f"💡 **Nova Sugestão**\n📅 **Data:** {data_envio}\n👤 **Autor:** {consultor}\n🌐 **IP:** {ip_usuario}\n\n📝 **Sugestão:**\n{texto}"
+    try: send_to_chat("extras", msg); return True
     except: return False
 
 # ============================================
@@ -233,7 +277,8 @@ def log_status_change(consultor, old_status, new_status, duration):
     new_lbl = new_status if new_status else 'Fila Bastão'
     if consultor in st.session_state.bastao_queue:
         if 'Bastão' not in new_lbl and new_lbl != 'Fila Bastão': new_lbl = f"Fila | {new_lbl}"
-    st.session_state.daily_logs.append({'timestamp': now_br, 'consultor': consultor, 'old_status': old_lbl, 'new_status': new_lbl, 'duration': duration})
+    ip_reg = get_remote_ip()
+    st.session_state.daily_logs.append({'timestamp': now_br, 'consultor': consultor, 'old_status': old_lbl, 'new_status': new_lbl, 'duration': duration, 'ip': ip_reg})
     st.session_state.current_status_starts[consultor] = now_br
 
 def update_status(novo_status: str, marcar_indisponivel: bool = False):
@@ -367,7 +412,9 @@ def reset_day_state():
 
 def ensure_daily_reset():
     now_br = get_brazil_time(); last_run = st.session_state.report_last_run_date
-    if now_br.date() > last_run.date(): reset_day_state(); st.toast("☀️ Novo dia detectado! Fila limpa.", icon="🧹"); save_state()
+    if now_br.date() > last_run.date():
+        if st.session_state.daily_logs: send_daily_report_to_webhook()
+        reset_day_state(); st.toast("☀️ Novo dia detectado! Fila limpa.", icon="🧹"); save_state()
 
 def toggle_queue(consultor):
     ensure_daily_reset(); st.session_state.gif_warning = False; now_br = get_brazil_time()
@@ -477,6 +524,23 @@ def handle_chamado_submission():
     return ok
 
 def set_chamado_step(step): st.session_state.chamado_guide_step = int(step)
+
+def send_daily_report_to_webhook():
+    logs = st.session_state.daily_logs
+    if not logs: return False
+    lines = []
+    lines.append("📊 **Relatório Diário de Atividades (Bastão)**")
+    lines.append(f"📅 Data: {datetime.now().strftime('%d/%m/%Y')}")
+    lines.append("")
+    for l in logs[-50:]:
+        hora = l['timestamp'].strftime('%H:%M')
+        dur = format_time_duration(l['duration'])
+        # ID para auditoria
+        dev_id = l.get('ip', 'N/A')
+        lines.append(f"`{hora}` **{l['consultor']}**: {l['old_status']} ➝ {l['new_status']} ({dur}) [IP:{dev_id}]")
+    msg = "\n".join(lines)
+    try: send_to_chat("extras", msg); return True
+    except: return False
 
 # ============================================
 # 5. INTERFACE
@@ -612,13 +676,14 @@ with col_principal:
     st.markdown("####"); st.button('🔄 Atualizar (Manual)', on_click=manual_rerun, use_container_width=True); st.markdown("---")
     
     # --- MENUS RESTAURADOS (FERRAMENTAS) ---
-    c_tool1, c_tool2, c_tool3, c_tool4, c_tool5, c_tool6 = st.columns(6)
+    c_tool1, c_tool2, c_tool3, c_tool4, c_tool5, c_tool6, c_tool7 = st.columns(7)
     c_tool1.button("📑 Checklist", use_container_width=True, on_click=toggle_view, args=("checklist",))
     c_tool2.button("🆘 Chamados", use_container_width=True, on_click=toggle_view, args=("chamados",))
     c_tool3.button("📝 Atendimentos", use_container_width=True, on_click=toggle_view, args=("atendimentos",))
     c_tool4.button("⏰ H. Extras", use_container_width=True, on_click=toggle_view, args=("hextras",))
     c_tool5.button("🐛 Erro/Novidade", use_container_width=True, on_click=toggle_view, args=("erro_novidade",))
     c_tool6.button("🖨️ Certidão", use_container_width=True, on_click=toggle_view, args=("certidao",))
+    c_tool7.button("💡 Sugestão", use_container_width=True, on_click=toggle_view, args=("sugestao",))
 
     if st.session_state.active_view == "checklist":
         with st.container(border=True):
@@ -676,9 +741,9 @@ with col_principal:
 
     if st.session_state.active_view == "certidao":
         with st.container(border=True):
-            st.header("🖨️ Registro de Certidão"); tipo_cert = st.selectbox("Tipo:", ["Física", "Eletrônica", "Geral"]); c_data = st.date_input("Data do Evento:", value=get_brazil_time().date())
+            st.header("🖨️ Registro de Certidão (2026)"); tipo_cert = st.selectbox("Tipo:", ["Física", "Eletrônica", "Geral"]); c_data = st.date_input("Data do Evento:", value=get_brazil_time().date())
             c_cons = st.session_state.consultor_selectbox
-            if tipo_cert == "Geral": c_hora = st.text_input("Horário/Período:"); c_motivo = st.text_input("Motivo:"); c_proc = ""
+            if tipo_cert == "Geral": c_hora = st.text_input("Horário/Período:"); c_motivo = st.text_input("Motivo:"); c_proc = ""; c_chamado = ""
             else: c_hora = ""; c1, c2 = st.columns(2); c_chamado = c1.text_input("Chamado:"); c_proc = c2.text_input("Processo:"); c_motivo = st.text_area("Motivo:")
             
             c1, c2 = st.columns(2)
@@ -694,11 +759,65 @@ with col_principal:
                             # --- WEBHOOK CERTIDÃO AQUI ---
                             msg_cert = f"🖨️ **Nova Certidão Registrada**\n👤 **Autor:** {c_cons}\n📅 **Data:** {c_data.strftime('%d/%m/%Y')}\n📄 **Tipo:** {tipo_cert}"
                             try: send_to_chat("certidao", msg_cert)
-                            except: pass
+                            except Exception as e: st.error(f"Erro Webhook: {e}")
                             # -----------------------------
                             st.success("Salvo!"); time.sleep(1); st.session_state.active_view = None; st.session_state.word_buffer = None; st.rerun()
+                        else: st.error("Erro ao salvar no banco.")
             if st.button("❌ Cancelar"): st.session_state.active_view = None; st.rerun()
             if st.session_state.get('aviso_duplicidade'): st.error("Registro já existe!"); st.button("Ok", on_click=st.rerun)
+
+    if st.session_state.active_view == "sugestao":
+        with st.container(border=True):
+            st.header("💡 Enviar Sugestão")
+            sug_txt = st.text_area("Sua ideia ou melhoria:")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Enviar Sugestão", type="primary", use_container_width=True):
+                    if handle_sugestao_submission(st.session_state.consultor_selectbox, sug_txt):
+                        st.success("Enviado com sucesso!")
+                        st.session_state.active_view = None; st.rerun()
+                    else: st.error("Erro ao enviar.")
+            with c2:
+                if st.button("Cancelar", use_container_width=True): st.session_state.active_view = None; st.rerun()
+
+    # --- GRÁFICO OPERACIONAL (ABAIXO DOS BOTÕES) ---
+    st.markdown("---")
+    st.subheader("📊 Resumo Operacional")
+    sb = get_supabase()
+    if sb:
+        try:
+            res = sb.table("atendimentos_resumo").select("data").eq("id", 2).execute()
+            if res.data:
+                json_data = res.data[0]['data']
+                if 'totais_por_relatorio' in json_data:
+                    df_chart = pd.DataFrame(json_data['totais_por_relatorio'])
+                    # Formato longo para Altair
+                    df_long = df_chart.melt(id_vars=['relatorio'], value_vars=['Eproc', 'Legados'], var_name='Sistema', value_name='Qtd')
+                    
+                    # Gráfico Barras Lado a Lado (xOffset) com Labels
+                    base = alt.Chart(df_long).encode(
+                        x=alt.X('relatorio', title=None, axis=alt.Axis(labels=True, labelAngle=0)),
+                        y=alt.Y('Qtd', title='Quantidade'),
+                        color=alt.Color('Sistema', legend=alt.Legend(title="Sistema")),
+                        xOffset='Sistema' # Agrupamento lado a lado
+                    )
+                    
+                    bars = base.mark_bar()
+                    
+                    text = base.mark_text(dy=-5, color='black').encode(
+                        text='Qtd'
+                    )
+                    
+                    final_chart = (bars + text).properties(height=300)
+                    
+                    st.altair_chart(final_chart, use_container_width=True)
+                    st.caption(f"Gerado em: {json_data.get('gerado_em', '-')}")
+                    
+                    # Tabela de Dados (Sempre visível)
+                    st.markdown("### Dados Detalhados")
+                    st.dataframe(df_chart, use_container_width=True)
+            else: st.info("Sem dados de resumo.")
+        except Exception as e: st.error(f"Erro ao carregar gráfico: {e}")
 
 with col_disponibilidade:
     st.header('Status dos(as) Consultores(as)')
