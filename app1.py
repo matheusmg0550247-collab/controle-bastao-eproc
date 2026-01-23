@@ -15,6 +15,11 @@ from supabase import create_client
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+# Importação condicional para evitar erros em alguns ambientes
+try:
+    from streamlit_javascript import st_javascript
+except ImportError:
+    st_javascript = None
 
 # Importações locais
 from repository import load_state_from_db, save_state_to_db
@@ -24,7 +29,7 @@ from utils import (get_brazil_time, get_secret, send_to_chat, get_img_as_base64)
 # 1. CONFIGURAÇÕES E CONSTANTES
 # ============================================
 CONSULTORES = sorted([
-    "Alex Paulo", "Dirceu Gonçalves", "Douglas De Souza", "Farley Leandro", "Gleis Da Silva", 
+ "Alex Paulo", "Dirceu Gonçalves", "Douglas De Souza", "Farley Leandro", "Gleis Da Silva", 
     "Hugo Leonardo", "Igor Dayrell", "Jerry Marcos", "Jonatas Gomes", "Leandro Victor", 
     "Luiz Henrique", "Marcelo Dos Santos", "Marina Silva", "Marina Torres", "Vanessa Ligiane"
 ])
@@ -64,7 +69,23 @@ def get_supabase():
     try: return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
     except: return None
 
-# --- FUNÇÃO NOVA DE IP ---
+# --- FUNÇÃO DE IP E ID ---
+def get_browser_id():
+    """Gera ou recupera um ID único do navegador."""
+    if st_javascript is None: return "no_js_lib"
+    js_code = """(function() {
+        let id = localStorage.getItem("device_id");
+        if (!id) {
+            id = "id_" + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem("device_id", id);
+        }
+        return id;
+    })();"""
+    try:
+        # Key única fixa para evitar reexecução desnecessária
+        return st_javascript(js_code, key="browser_id_tag")
+    except: return "unknown_device"
+
 def get_remote_ip():
     try:
         from streamlit.web.server.websocket_headers import ClientWebSocketRequest
@@ -365,6 +386,10 @@ def check_and_assume_baton(forced_successor=None, immune_consultant=None):
     return changed
 
 def init_session_state():
+    # Inicializa ID do navegador
+    dev_id = get_browser_id()
+    if dev_id: st.session_state['device_id_val'] = dev_id
+
     if 'db_loaded' not in st.session_state:
         try:
             db_data = load_state_from_db()
@@ -560,6 +585,11 @@ with c_topo_dir:
     with c_sub2:
         if st.button("🚀 Entrar", use_container_width=True):
             if novo_responsavel != "Selecione": toggle_queue(novo_responsavel); st.rerun()
+    
+    # Exibe ID visual
+    dev_id_short = st.session_state.get('device_id_val', '???')[-4:] if 'device_id_val' in st.session_state else '...'
+    st.caption(f"ID: ...{dev_id_short}")
+
 st.markdown("<hr style='border: 1px solid #FFD700; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
 if st.session_state.active_view is None: st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db() 
@@ -596,19 +626,31 @@ with col_principal:
     if lista_pularam: st.markdown(f"**Consultor(es) pulou(pularam) o bastão:** {', '.join(lista_pularam)}")
 
     st.markdown("###"); st.header("**Consultor(a)**")
-    st.selectbox('Selecione:', ['Selecione um nome'] + CONSULTORES, key='consultor_selectbox', label_visibility='collapsed')
-    r1c1, r1c2, r1c3, r1c4 = st.columns(4); r2c1, r2c2, r2c3, r2c4, r2c5, r2c6 = st.columns(6)
-    r1c1.button('🎯 Passar', on_click=rotate_bastao, use_container_width=True)
-    r1c2.button('⏭️ Pular', on_click=toggle_skip, use_container_width=True)
-    r1c3.button('📋 Atividades', on_click=toggle_view, args=('menu_atividades',), use_container_width=True)
-    r1c4.button('🏗️ Projeto', on_click=toggle_view, args=('menu_projetos',), use_container_width=True)
-    r2c1.button('🎓 Treinamento', on_click=toggle_view, args=('menu_treinamento',), use_container_width=True)
-    r2c2.button('📅 Reunião', on_click=toggle_view, args=('menu_reuniao',), use_container_width=True)
-    r2c3.button('🍽️ Almoço', on_click=update_status, args=('Almoço', True), use_container_width=True)
-    r2c4.button('🎙️ Sessão', on_click=toggle_view, args=('menu_sessao',), use_container_width=True)
-    r2c5.button('🚶 Saída', on_click=update_status, args=('Saída rápida', True), use_container_width=True)
-    r2c6.button('👤 Ausente', on_click=update_status, args=('Ausente', True), use_container_width=True)
-    if st.button("🤝 Atend. Presencial", use_container_width=True): toggle_view('menu_presencial')
+    # Layout colunas 1:3 para Nome vs Botões
+    c_nome, c_botoes = st.columns([1, 3], vertical_alignment="bottom")
+    with c_nome:
+        st.selectbox('Selecione:', ['Selecione um nome'] + CONSULTORES, key='consultor_selectbox', label_visibility='collapsed')
+    
+    # Botões na direita
+    with c_botoes:
+        r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+        r1c1.button('🎯 Passar', on_click=rotate_bastao, use_container_width=True)
+        r1c2.button('⏭️ Pular', on_click=toggle_skip, use_container_width=True)
+        # Mais botões aqui se quiser, ou mantenha o grid original abaixo
+    
+    # Grid de status
+    r2c1, r2c2, r2c3, r2c4, r2c5, r2c6 = st.columns(6)
+    r2c1.button('📋 Atividades', on_click=toggle_view, args=('menu_atividades',), use_container_width=True)
+    r2c2.button('🏗️ Projeto', on_click=toggle_view, args=('menu_projetos',), use_container_width=True)
+    r2c3.button('🎓 Treinamento', on_click=toggle_view, args=('menu_treinamento',), use_container_width=True)
+    r2c4.button('📅 Reunião', on_click=toggle_view, args=('menu_reuniao',), use_container_width=True)
+    r2c5.button('🍽️ Almoço', on_click=update_status, args=('Almoço', True), use_container_width=True)
+    r2c6.button('🎙️ Sessão', on_click=toggle_view, args=('menu_sessao',), use_container_width=True)
+    
+    r3c1, r3c2, r3c3, r3c4 = st.columns(4)
+    r3c1.button('🚶 Saída', on_click=update_status, args=('Saída rápida', True), use_container_width=True)
+    r3c2.button('👤 Ausente', on_click=update_status, args=('Ausente', True), use_container_width=True)
+    if r3c3.button("🤝 Atend. Presencial", use_container_width=True): toggle_view('menu_presencial')
 
     if st.session_state.active_view == 'menu_atividades':
         with st.container(border=True):
@@ -780,7 +822,7 @@ with col_principal:
             with c2:
                 if st.button("Cancelar", use_container_width=True): st.session_state.active_view = None; st.rerun()
 
-    # --- GRÁFICO OPERACIONAL (ABAIXO DOS BOTÕES) ---
+    # --- GRÁFICO OPERACIONAL ABAIXO DOS BOTÕES ---
     st.markdown("---")
     st.subheader("📊 Resumo Operacional")
     sb = get_supabase()
