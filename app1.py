@@ -23,7 +23,6 @@ except ImportError:
     st_javascript = None
 
 # Importações de utilitários
-# Trazemos o essencial para cá ou usamos utils se seguro
 from utils import (get_brazil_time, get_secret, send_to_chat)
 
 # ============================================
@@ -41,20 +40,6 @@ REG_SISTEMA_OPCOES = ["Conveniados", "Outros", "Eproc", "Themis", "JPE", "SIAP"]
 REG_CANAL_OPCOES = ["Presencial", "Telefone", "Email", "Whatsapp", "Outros"]
 REG_DESFECHO_OPCOES = ["Resolvido - Cesupe", "Escalonado"]
 
-CAMARAS_DICT = {
-    "Cartório da 1ª Câmara Cível": "caciv1@tjmg.jus.br", "Cartório da 2ª Câmara Cível": "caciv2@tjmg.jus.br",
-    "Cartório da 3ª Câmara Cível": "caciv3@tjmg.jus.br", "Cartório da 4ª Câmara Cível": "caciv4@tjmg.jus.br",
-    "Cartório da 5ª Câmara Cível": "caciv5@tjmg.jus.br", "Cartório da 6ª Câmara Cível": "caciv6@tjmg.jus.br",
-    "Cartório da 7ª Câmara Cível": "caciv7@tjmg.jus.br", "Cartório da 8ª Câmara Cível": "caciv8@tjmg.jus.br",
-    "Cartório da 9ª Câmara Cível": "caciv9@tjmg.jus.br", "Cartório da 10ª Câmara Cível": "caciv10@tjmg.jus.br",
-    "Cartório da 11ª Câmara Cível": "caciv11@tjmg.jus.br", "Cartório da 12ª Câmara Cível": "caciv12@tjmg.jus.br",
-    "Cartório da 13ª Câmara Cível": "caciv13@tjmg.jus.br", "Cartório da 14ª Câmara Cível": "caciv14@tjmg.jus.br",
-    "Cartório da 15ª Câmara Cível": "caciv15@tjmg.jus.br", "Cartório da 16ª Câmara Cível": "caciv16@tjmg.jus.br",
-    "Cartório da 17ª Câmara Cível": "caciv17@tjmg.jus.br", "Cartório da 18ª Câmara Cível": "caciv18@tjmg.jus.br",
-    "Cartório da 19ª Câmara Cível": "caciv19@tjmg.jus.br", "Cartório da 20ª Câmara Cível": "caciv20@tjmg.jus.br",
-    "Cartório da 21ª Câmara Cível": "caciv21@tjmg.jus.br"
-}
-CAMARAS_OPCOES = sorted(list(CAMARAS_DICT.keys()))
 OPCOES_ATIVIDADES_STATUS = ["HP", "E-mail", "WhatsApp Plantão", "Homologação", "Redação Documentos", "Outros"]
 
 GIF_BASTAO_HOLDER = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExa3Uwazd5cnNra2oxdDkydjZkcHdqcWN2cng0Y2N0cmNmN21vYXVzMiZlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/3rXs5J0hZkXwTZjuvM/giphy.gif"
@@ -70,13 +55,14 @@ WEBHOOK_STATE_DUMP = get_secret("webhook", "test_state")
 # 2. OTIMIZAÇÃO DE MEMÓRIA (CACHES)
 # ============================================
 
-@st.cache_resource
+# REMOVIDO @st.cache_resource DAQUI PARA GARANTIR CONEXÃO SEMPRE NOVA
 def get_supabase():
     try: 
         return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
     except: 
         return None
 
+# MANTIDO CACHE NO GRÁFICO (PESADO)
 @st.cache_data(ttl=86400, show_spinner=False)
 def carregar_dados_grafico():
     sb = get_supabase()
@@ -92,6 +78,7 @@ def carregar_dados_grafico():
         print(f"Erro ao carregar gráfico: {e}")
     return None, None
 
+# MANTIDO CACHE NA IMAGEM (IO DE DISCO)
 @st.cache_data
 def get_img_as_base64_cached(file_path):
     try:
@@ -101,7 +88,7 @@ def get_img_as_base64_cached(file_path):
     except: return None
 
 # ============================================
-# 3. REPOSITÓRIO (INLINE - FIM DO KEYERROR)
+# 3. REPOSITÓRIO (INLINE - SEM DEPENDÊNCIAS EXTERNAS)
 # ============================================
 def load_state_from_db():
     sb = get_supabase()
@@ -293,7 +280,7 @@ def handle_erro_novidade_submission(consultor, titulo, objetivo, relato, resulta
     except: return False
 
 def send_sessao_to_chat_fn(consultor, texto_mensagem):
-    # Retorna True sem enviar, conforme solicitado
+    # Não envia, conforme solicitado
     return True
 
 def handle_sugestao_submission(consultor, texto):
@@ -369,6 +356,10 @@ def log_status_change(consultor, old_status, new_status, duration):
     st.session_state.current_status_starts[consultor] = now_br
 
 def update_status(novo_status: str, marcar_indisponivel: bool = False, manter_fila_atual: bool = False):
+    """
+    manter_fila_atual: Se True, não força entrada nem saída da fila. Mantém o estado atual.
+    Usado para 'Atividades' e 'Projetos' quando a pessoa já está no bastão.
+    """
     selected = st.session_state.get('consultor_selectbox')
     if not selected or selected == 'Selecione um nome': st.warning('Selecione um(a) consultor(a).'); return
     
@@ -378,6 +369,7 @@ def update_status(novo_status: str, marcar_indisponivel: bool = False, manter_fi
     forced_successor = None
     current_holder = next((c for c, s in st.session_state.status_texto.items() if 'Bastão' in (s or '')), None)
     
+    # === MEMÓRIA DE STATUS (Para retorno de Almoço) ===
     if novo_status == 'Almoço':
         st.session_state.previous_states[selected] = {
             'status': current,
@@ -1025,6 +1017,7 @@ with col_disponibilidade:
         for i, nome in enumerate(render_order):
             if nome not in ui_lists['fila']: continue
             col_nome, col_check = st.columns([0.85, 0.15], vertical_alignment='center')
+            # CHECKBOX AGORA É APENAS VISUAL (DISABLED), CONTROLE PELO BOTÃO BASTÃO
             col_check.checkbox(' ', key=f'chk_fila_{nome}', value=True, disabled=True, label_visibility='collapsed')
             skip_flag = skips.get(nome, False); status_atual = st.session_state.status_texto.get(nome, '') or ''; extra = ''
             if 'Atividade' in status_atual: extra += ' 📋'
