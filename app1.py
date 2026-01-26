@@ -752,7 +752,7 @@ def close_logmein_ui():
 # ============================================
 # 8. INTERFACE
 # ============================================
-st.set_page_config(page_title="Controle Bastão Cesupe 2026", layout="wide", page_icon="🥂")
+st.set_page_config(page_title="Controle Bastão Equipe 1", layout="wide", page_icon="🔥")
 st.markdown("""<style>div.stButton > button {width: 100%; white-space: nowrap; height: 3rem;} [data-testid='stHorizontalBlock'] div.stButton > button {white-space: nowrap; height: 3rem;}</style>""", unsafe_allow_html=True)
 init_session_state(); auto_manage_time()
 st.components.v1.html("<script>window.scrollTo(0, 0);</script>", height=0)
@@ -760,10 +760,9 @@ st.components.v1.html("<script>window.scrollTo(0, 0);</script>", height=0)
 c_topo_esq, c_topo_dir = st.columns([2, 1], vertical_alignment="bottom")
 with c_topo_esq:
     img = get_img_as_base64_cached(PUG2026_FILENAME); src = f"data:image/png;base64,{img}" if img else GIF_BASTAO_HOLDER
-    # --- TÍTULO RESTAURADO ---
+    # --- TÍTULO RESTAURADO PARA O ORIGINAL ---
     st.markdown(f"""<div style="display: flex; align-items: center; gap: 15px;"><h1 style="margin: 0; padding: 0; font-size: 2.2rem; color: #FF4500; text-shadow: 1px 1px 2px #333;">Controle Bastão (Equipe ID 1) {BASTAO_EMOJI}</h1><img src="{src}" style="width: 100px; height: 100px; border-radius: 50%; border: 3px solid #FF4500; object-fit: cover;"></div>""", unsafe_allow_html=True)
 with c_topo_dir:
-    # --- LAYOUT ORIGINAL RESTAURADO ---
     c_sub1, c_sub2 = st.columns([2, 1], vertical_alignment="bottom")
     with c_sub1: novo_responsavel = st.selectbox("Assumir Bastão (Rápido)", options=["Selecione"] + CONSULTORES, label_visibility="collapsed", key="quick_enter")
     with c_sub2:
@@ -773,6 +772,7 @@ with c_topo_dir:
     dev_id_short = st.session_state.get('device_id_val', '???')[-4:] if 'device_id_val' in st.session_state else '...'
     st.caption(f"ID: ...{dev_id_short}")
 
+# --- LINHA DIVISÓRIA RESTAURADA ---
 st.markdown("<hr style='border: 1px solid #FF4500; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
 if st.session_state.active_view is None: st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db() 
@@ -930,8 +930,8 @@ with col_principal:
             st.markdown("### 💻 Acesso LogMeIn")
             l_user, l_in_use = get_logmein_status()
             
-            # Mostra o GIF
-            st.image(GIF_LOGMEIN_TARGET, use_container_width=True)
+            # Mostra o GIF COM TAMANHO REDUZIDO
+            st.image(GIF_LOGMEIN_TARGET, width=300)
             
             if l_in_use:
                 st.error(f"🔴 EM USO POR: **{l_user}**")
