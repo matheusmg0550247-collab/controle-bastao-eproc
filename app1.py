@@ -67,7 +67,7 @@ def carregar_dados_grafico():
     sb = get_supabase()
     if not sb: return None, None
     try:
-        # --- ID ALTERADO PARA 1 ---
+        # ID 1
         res = sb.table("atendimentos_resumo").select("data").eq("id", 1).execute()
         if res.data:
             json_data = res.data[0]['data']
@@ -106,7 +106,7 @@ def load_state_from_db():
     sb = get_supabase()
     if not sb: return {}
     try:
-        # --- ID ALTERADO PARA 1 ---
+        # ID 1
         response = sb.table("app_state").select("data").eq("id", 1).execute()
         if response.data and len(response.data) > 0:
             return response.data[0].get("data", {})
@@ -122,7 +122,7 @@ def save_state_to_db(state_data):
         return
     try:
         sanitized_data = clean_data_for_db(state_data)
-        # --- ID ALTERADO PARA 1 ---
+        # ID 1
         sb.table("app_state").upsert({"id": 1, "data": sanitized_data}).execute()
     except Exception as e:
         st.error(f"🔥 ERRO DE ESCRITA NO BANCO: {e}")
