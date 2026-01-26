@@ -26,11 +26,10 @@ except ImportError:
 from utils import (get_brazil_time, get_secret, send_to_chat)
 
 # ============================================
-# 1. CONFIGURAÇÕES E CONSTANTES
+# 1. CONFIGURAÇÕES E CONSTANTES (EQUIPE ID 1)
 # ============================================
-# --- CONFIGURAÇÃO ESPECÍFICA ID 1 ---
-DB_APP_ID = 1       # ID da Fila desta equipe
-LOGMEIN_DB_ID = 1   # ID do LogMeIn (Compartilhado)
+DB_APP_ID = 1        # ID da Fila desta equipe
+LOGMEIN_DB_ID = 1    # ID do LogMeIn (Compartilhado sempre 1)
 
 CONSULTORES = sorted([
     "Alex Paulo", "Dirceu Gonçalves", "Douglas De Souza", "Farley Leandro", "Gleis Da Silva", 
@@ -47,9 +46,9 @@ REG_DESFECHO_OPCOES = ["Resolvido - Cesupe", "Escalonado"]
 OPCOES_ATIVIDADES_STATUS = ["HP", "E-mail", "WhatsApp Plantão", "Homologação", "Redação Documentos", "Outros"]
 
 GIF_BASTAO_HOLDER = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExa3Uwazd5cnNra2oxdDkydjZkcHdqcWN2cng0Y2N0cmNmN21vYXVzMiZlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/3rXs5J0hZkXwTZjuvM/giphy.gif"
-GIF_LOGMEIN_OCUPADO = "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjFvczlzd3ExMWc2cWJrZ3EwNmplM285OGFqOHE1MXlzdnd4cndibiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/mcsPU3SkKrYDdW3aAU/giphy.gif"
+GIF_LOGMEIN_TARGET = "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjFvczlzd3ExMWc2cWJrZ3EwNmplM285OGFqOHE1MXlzdnd4cndibiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/mcsPU3SkKrYDdW3aAU/giphy.gif"
 BASTAO_EMOJI = "🔥" 
-PUG2026_FILENAME = "pug2026.png" # Nome do arquivo local se existir
+PUG2026_FILENAME = "pug2026.png"
 APP_URL_CLOUD = 'https://controle-bastao-equipe1.streamlit.app'
 
 # Secrets
@@ -72,7 +71,7 @@ def carregar_dados_grafico():
     sb = get_supabase()
     if not sb: return None, None
     try:
-        # Usa o ID da constante
+        # ID 1
         res = sb.table("atendimentos_resumo").select("data").eq("id", DB_APP_ID).execute()
         if res.data:
             json_data = res.data[0]['data']
@@ -95,7 +94,6 @@ def get_img_as_base64_cached(file_path):
 # 3. REPOSITÓRIO (COM TRATAMENTO DE TIMEDELTA)
 # ============================================
 
-# Função auxiliar para limpar dados antes de enviar para o banco
 def clean_data_for_db(obj):
     if isinstance(obj, dict):
         return {k: clean_data_for_db(v) for k, v in obj.items()}
@@ -112,6 +110,7 @@ def load_state_from_db():
     sb = get_supabase()
     if not sb: return {}
     try:
+        # ID 1
         response = sb.table("app_state").select("data").eq("id", DB_APP_ID).execute()
         if response.data and len(response.data) > 0:
             return response.data[0].get("data", {})
@@ -127,16 +126,16 @@ def save_state_to_db(state_data):
         return
     try:
         sanitized_data = clean_data_for_db(state_data)
+        # ID 1
         sb.table("app_state").upsert({"id": DB_APP_ID, "data": sanitized_data}).execute()
     except Exception as e:
         st.error(f"🔥 ERRO DE ESCRITA NO BANCO: {e}")
 
-# --- FUNÇÕES LOGMEIN ---
+# --- LOGMEIN DB ---
 def get_logmein_status():
     sb = get_supabase()
     if not sb: return None, False
     try:
-        # ID LOGMEIN É SEMPRE 1 (COMPARTILHADO)
         res = sb.table("controle_logmein").select("*").eq("id", LOGMEIN_DB_ID).execute()
         if res.data:
             return res.data[0].get('consultor_atual'), res.data[0].get('em_uso', False)
@@ -401,7 +400,7 @@ def log_status_change(consultor, old_status, new_status, duration):
     })
     st.session_state.current_status_starts[consultor] = now_br
 
-# --- ATUALIZADO: LOGICA EXCLUDENTE DE FILA VS STATUS ---
+# --- LÓGICA RIGOROSA DE ATUALIZAÇÃO DE STATUS ---
 def update_status(novo_status: str, marcar_indisponivel: bool = False, manter_fila_atual: bool = False):
     selected = st.session_state.get('consultor_selectbox')
     if not selected or selected == 'Selecione um nome': st.warning('Selecione um(a) consultor(a).'); return
@@ -418,21 +417,33 @@ def update_status(novo_status: str, marcar_indisponivel: bool = False, manter_fi
             'in_queue': selected in st.session_state.bastao_queue
         }
     
-    # Se for marcar indisponível (Almoço, Reunião, Presencial, etc), remove da fila
-    if marcar_indisponivel:
-        st.session_state[f'check_{selected}'] = False; st.session_state.skip_flags[selected] = True
-        if selected in st.session_state.bastao_queue:
-            st.session_state.bastao_queue.remove(selected)
-            if selected not in st.session_state.priority_return_queue: st.session_state.priority_return_queue.append(selected)
-    
-    # Se for "Indisponível" (Botão Sair), também remove
-    if novo_status == 'Indisponível':
-        if selected in st.session_state.bastao_queue:
-            st.session_state.bastao_queue.remove(selected)
-    
-    # Manter fila (ex: Atividades)
+    # 1. Se for status bloqueante (Almoço, Reunião, etc), REMOVE DA FILA.
+    if marcar_indisponivel and selected in st.session_state.bastao_queue:
+        # Se era o titular, prepara sucessão
+        if selected == current_holder:
+            try:
+                idx = st.session_state.bastao_queue.index(selected)
+                nxt = find_next_holder_index(idx, st.session_state.bastao_queue, st.session_state.skip_flags)
+                if nxt != -1: forced_successor = st.session_state.bastao_queue[nxt]
+            except: pass
+        
+        st.session_state.bastao_queue.remove(selected)
+        st.session_state[f'check_{selected}'] = False
+        st.session_state.skip_flags[selected] = True
+        if selected not in st.session_state.priority_return_queue: st.session_state.priority_return_queue.append(selected)
+
+    # 2. Se for "Atividades" ou "Projeto", MANTÉM NA FILA se já estiver.
     elif manter_fila_atual:
+        # Não faz nada com a fila, apenas atualiza texto.
         pass 
+    
+    # 3. Se for entrar na fila (lógica do botão toggle_queue), ZERA o status. (Feito na função toggle_queue)
+    else:
+        # Caso genérico, se entrou, garante check
+        if selected not in st.session_state.bastao_queue:
+             st.session_state.bastao_queue.append(selected)
+        st.session_state[f'check_{selected}'] = True
+        st.session_state.skip_flags[selected] = False
     
     clean_new = (novo_status or '').strip()
     if clean_new == 'Fila Bastão': clean_new = ''
@@ -441,7 +452,7 @@ def update_status(novo_status: str, marcar_indisponivel: bool = False, manter_fi
     if selected == current_holder and selected in st.session_state.bastao_queue:
          final_status = ('Bastão | ' + clean_new).strip(' |') if clean_new else 'Bastão'
 
-    # Se saiu da fila e não tem status, vira Indisponível
+    # Se saiu da fila e não tem status, vira indisponível (caso do botão Sair)
     if not final_status and (selected not in st.session_state.bastao_queue): final_status = 'Indisponível'
     
     try:
@@ -532,7 +543,7 @@ def init_session_state():
         'consultor_selectbox': "Selecione um nome", 'status_texto': {nome: 'Indisponível' for nome in CONSULTORES},
         'bastao_queue': [], 'skip_flags': {}, 'current_status_starts': {nome: now for nome in CONSULTORES},
         'bastao_counts': {nome: 0 for nome in CONSULTORES}, 'priority_return_queue': [], 'daily_logs': [], 'simon_ranking': [],
-        'word_buffer': None, 'aviso_duplicidade': False, 'previous_states': {}
+        'word_buffer': None, 'aviso_duplicidade': False, 'previous_states': {}, 'view_logmein_ui': False
     }
     for key, default in defaults.items():
         if key not in st.session_state: st.session_state[key] = default
@@ -598,7 +609,7 @@ def toggle_queue(consultor):
         if consultor in st.session_state.priority_return_queue: st.session_state.priority_return_queue.remove(consultor)
         current_s = st.session_state.status_texto.get(consultor, 'Indisponível')
         
-        # --- LIMPA O STATUS ANTERIOR AO ENTRAR NA FILA ---
+        # --- ZERAR STATUS AO ENTRAR ---
         log_status_change(consultor, current_s, '', now_br - st.session_state.current_status_starts.get(consultor, now_br))
         st.session_state.status_texto[consultor] = ''
         
@@ -732,49 +743,39 @@ def send_daily_report_to_webhook():
     try: send_to_chat("extras", msg); return True
     except: return False
 
+def open_logmein_ui():
+    st.session_state.view_logmein_ui = True
+
+def close_logmein_ui():
+    st.session_state.view_logmein_ui = False
+
 # ============================================
 # 8. INTERFACE
 # ============================================
-st.set_page_config(page_title="Controle Bastão Equipe 1", layout="wide", page_icon="🔥")
+st.set_page_config(page_title="Controle Bastão Cesupe 2026", layout="wide", page_icon="🥂")
 st.markdown("""<style>div.stButton > button {width: 100%; white-space: nowrap; height: 3rem;} [data-testid='stHorizontalBlock'] div.stButton > button {white-space: nowrap; height: 3rem;}</style>""", unsafe_allow_html=True)
 init_session_state(); auto_manage_time()
 st.components.v1.html("<script>window.scrollTo(0, 0);</script>", height=0)
-st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db() 
 
 c_topo_esq, c_topo_dir = st.columns([2, 1], vertical_alignment="bottom")
 with c_topo_esq:
     img = get_img_as_base64_cached(PUG2026_FILENAME); src = f"data:image/png;base64,{img}" if img else GIF_BASTAO_HOLDER
+    # --- TÍTULO RESTAURADO ---
     st.markdown(f"""<div style="display: flex; align-items: center; gap: 15px;"><h1 style="margin: 0; padding: 0; font-size: 2.2rem; color: #FF4500; text-shadow: 1px 1px 2px #333;">Controle Bastão (Equipe ID 1) {BASTAO_EMOJI}</h1><img src="{src}" style="width: 100px; height: 100px; border-radius: 50%; border: 3px solid #FF4500; object-fit: cover;"></div>""", unsafe_allow_html=True)
-
-# ----------------- PAINEL LOGMEIN (NOVO) -----------------
-with st.container(border=True):
-    l_user, l_in_use = get_logmein_status()
-    c_log1, c_log2 = st.columns([0.7, 0.3])
-    with c_log1:
-        if l_in_use:
-            st.error(f"🔴 **LogMeIn OCUPADO** por: {l_user}")
-            st.image(GIF_LOGMEIN_OCUPADO, width=300)
-        else:
-            st.success("✅ **LogMeIn LIVRE**")
-    with c_log2:
-        meu_nome = st.session_state.get('consultor_selectbox')
-        if l_in_use:
-            # Botão Liberar
-            if meu_nome == l_user or meu_nome in CONSULTORES: 
-                if st.button("🔓 LIBERAR LogMeIn", use_container_width=True, type="primary"):
-                    set_logmein_status(None, False); st.rerun()
-        else:
-            # Botão Assumir
-            if meu_nome and meu_nome != "Selecione um nome":
-                if st.button("🚀 ASSUMIR LogMeIn", use_container_width=True):
-                    set_logmein_status(meu_nome, True); st.rerun()
-            else:
-                st.info("Selecione seu nome para assumir.")
-# ---------------------------------------------------------
+with c_topo_dir:
+    # --- LAYOUT ORIGINAL RESTAURADO ---
+    c_sub1, c_sub2 = st.columns([2, 1], vertical_alignment="bottom")
+    with c_sub1: novo_responsavel = st.selectbox("Assumir Bastão (Rápido)", options=["Selecione"] + CONSULTORES, label_visibility="collapsed", key="quick_enter")
+    with c_sub2:
+        if st.button("🚀 Entrar", use_container_width=True):
+            if novo_responsavel != "Selecione": toggle_queue(novo_responsavel); st.rerun()
+    
+    dev_id_short = st.session_state.get('device_id_val', '???')[-4:] if 'device_id_val' in st.session_state else '...'
+    st.caption(f"ID: ...{dev_id_short}")
 
 st.markdown("<hr style='border: 1px solid #FF4500; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
-if st.session_state.active_view is None: pass 
+if st.session_state.active_view is None: st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db() 
 else: st.caption("⏸️ Atualização automática pausada durante o registro.")
 
 col_principal, col_disponibilidade = st.columns([1.5, 1])
@@ -825,14 +826,13 @@ with col_principal:
     r2c2.button('🏗️ Projeto', on_click=toggle_view, args=('menu_projetos',), use_container_width=True)
     r2c3.button('🎓 Treinamento', on_click=toggle_view, args=('menu_treinamento',), use_container_width=True)
     r2c4.button('📅 Reunião', on_click=toggle_view, args=('menu_reuniao',), use_container_width=True)
-    r2c5.button('🍽️ Almoço', on_click=update_status, args=('Almoço', True), use_container_width=True) # REMOVE DA FILA (TRUE)
+    r2c5.button('🍽️ Almoço', on_click=update_status, args=('Almoço', True), use_container_width=True) # REMOVE DA FILA
     
     r3c1, r3c2, r3c3, r3c4 = st.columns(4)
     r3c1.button('🎙️ Sessão', on_click=toggle_view, args=('menu_sessao',), use_container_width=True)
-    r3c2.button('🚶 Saída', on_click=update_status, args=('Saída rápida', True), use_container_width=True) # REMOVE DA FILA (TRUE)
+    r3c2.button('🚶 Saída', on_click=update_status, args=('Saída rápida', True), use_container_width=True) # REMOVE DA FILA
     
-    # BOTÃO SAIR GERAL -> JOGA PARA INDISPONÍVEL E TIRA DA FILA
-    r3c3.button('🏃 Sair', on_click=update_status, args=('Indisponível', True), use_container_width=True)
+    r3c3.button('🏃 Sair', on_click=update_status, args=('Indisponível', True), use_container_width=True) # REMOVE DA FILA
     
     if r3c4.button("🤝 Atend. Presencial", use_container_width=True): toggle_view('menu_presencial')
 
@@ -844,11 +844,11 @@ with col_principal:
             with c1:
                 if st.button("Confirmar", type="primary", use_container_width=True): 
                     st.session_state.active_view = None
-                    update_status(f"Atividade: {', '.join(at_t)} - {at_e}", manter_fila_atual=True)
+                    update_status(f"Atividade: {', '.join(at_t)} - {at_e}", manter_fila_atual=True) # MANTÉM FILA
             with c2:
                 if st.button("Sair de atividades", use_container_width=True):
                     st.session_state.active_view = None
-                    update_status("", manter_fila_atual=True) # Limpa texto, mantém fila/bastão
+                    update_status("", manter_fila_atual=True) 
             with c3:
                 if st.button("Cancelar", use_container_width=True): st.session_state.active_view = None; st.rerun()
 
@@ -876,10 +876,8 @@ with col_principal:
                     else: 
                         st.session_state.active_view = None
                         status_msg = f"Projeto: {proj_nome.strip()}"
-                        if manter_bastao:
-                            update_status(status_msg, manter_fila_atual=True)
-                        else:
-                            update_status(status_msg, marcar_indisponivel=True)
+                        if manter_bastao: update_status(status_msg, manter_fila_atual=True)
+                        else: update_status(status_msg, marcar_indisponivel=True)
             with c_cancel:
                 if st.button('❌ Cancelar', use_container_width=True): st.session_state.active_view = None; st.rerun()
 
@@ -921,7 +919,48 @@ with col_principal:
             with c_cancel:
                 if st.button('❌ Cancelar', use_container_width=True): st.session_state.active_view = None; st.rerun()
 
-    st.markdown("####"); st.button('🔄 Atualizar (Manual)', on_click=manual_rerun, use_container_width=True); st.markdown("---")
+    st.markdown("####")
+    
+    # === AQUI ESTÁ A LÓGICA DO LOGMEIN SUBSTITUINDO O BOTÃO ATUALIZAR ===
+    if st.button('🔑 LogMeIn', use_container_width=True):
+        open_logmein_ui()
+    
+    if st.session_state.view_logmein_ui:
+        with st.container(border=True):
+            st.markdown("### 💻 Acesso LogMeIn")
+            l_user, l_in_use = get_logmein_status()
+            
+            # Mostra o GIF
+            st.image(GIF_LOGMEIN_TARGET, use_container_width=True)
+            
+            if l_in_use:
+                st.error(f"🔴 EM USO POR: **{l_user}**")
+                meu_nome = st.session_state.get('consultor_selectbox')
+                # Libera se for o dono ou admin
+                if meu_nome == l_user or meu_nome in CONSULTORES:
+                    if st.button("🔓 LIBERAR AGORA", type="primary", use_container_width=True):
+                        set_logmein_status(None, False)
+                        close_logmein_ui()
+                        st.rerun()
+                else:
+                    st.info("Aguarde a liberação.")
+            else:
+                st.success("✅ LIVRE PARA USO")
+                meu_nome = st.session_state.get('consultor_selectbox')
+                if meu_nome and meu_nome != "Selecione um nome":
+                    if st.button("🚀 ASSUMIR AGORA", use_container_width=True):
+                        set_logmein_status(meu_nome, True)
+                        close_logmein_ui()
+                        st.rerun()
+                else:
+                    st.warning("Selecione seu nome no topo para assumir.")
+            
+            if st.button("Fechar", use_container_width=True):
+                close_logmein_ui()
+                st.rerun()
+    # ====================================================================
+
+    st.markdown("---")
     
     # --- FERRAMENTAS ---
     c_tool1, c_tool2, c_tool3, c_tool4, c_tool5, c_tool6, c_tool7 = st.columns(7)
@@ -1059,7 +1098,6 @@ with col_disponibilidade:
         status = st.session_state.status_texto.get(nome, 'Indisponível'); status = status if status is not None else 'Indisponível'
         if status in ('', None): pass
         elif status == 'Almoço': ui_lists['almoco'].append(nome)
-        # REMOVIDO CHECK DE 'Ausente'
         elif status == 'Saída rápida': ui_lists['saida'].append(nome)
         elif status == 'Indisponível' and nome not in st.session_state.bastao_queue: ui_lists['indisponivel'].append(nome)
         if isinstance(status, str):
@@ -1112,5 +1150,4 @@ with col_disponibilidade:
     _render_section('Almoço', '🍽️', ui_lists['almoco'], 'red', 'Almoço')
     _render_section('Sessão', '🎙️', ui_lists['sessao_especifica'], 'green', 'Sessão')
     _render_section('Saída rápida', '🚶', ui_lists['saida'], 'red', 'Saída rápida')
-    # REMOVIDO RENDER SECTION 'Ausente'
     _render_section('Indisponível', '❌', ui_lists['indisponivel'], 'grey', '')
