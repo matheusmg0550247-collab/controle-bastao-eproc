@@ -28,14 +28,14 @@ from utils import (get_brazil_time, get_secret, send_to_chat)
 # ============================================
 # 1. CONFIGURAÇÕES E CONSTANTES
 # ============================================
-# --- CONFIGURAÇÃO ESPECÍFICA ID 2 (CESUPE) ---
-DB_APP_ID = 2       # ID da Fila desta equipe
+# --- CONFIGURAÇÃO ESPECÍFICA ID 1 ---
+DB_APP_ID = 1       # ID da Fila desta equipe
 LOGMEIN_DB_ID = 1   # ID do LogMeIn (Compartilhado)
 
 CONSULTORES = sorted([
-    "Barbara Mara", "Bruno Glaicon", "Claudia Luiza", "Douglas Paiva", "Fábio Alves", "Glayce Torres", 
-    "Isabela Dias", "Isac Candido", "Ivana Guimarães", "Leonardo Damaceno", "Marcelo PenaGuerra", 
-    "Michael Douglas", "Morôni", "Pablo Mol", "Ranyer Segal", "Sarah Leal", "Victoria Lisboa"
+    "Alex Paulo", "Dirceu Gonçalves", "Douglas De Souza", "Farley Leandro", "Gleis Da Silva", 
+    "Hugo Leonardo", "Igor Dayrell", "Jerry Marcos", "Jonatas Gomes", "Leandro Victor", 
+    "Luiz Henrique", "Marcelo Dos Santos", "Marina Silva", "Marina Torres", "Vanessa Ligiane"
 ])
 
 # Listas de Opções
@@ -48,9 +48,9 @@ OPCOES_ATIVIDADES_STATUS = ["HP", "E-mail", "WhatsApp Plantão", "Homologação"
 
 GIF_BASTAO_HOLDER = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExa3Uwazd5cnNra2oxdDkydjZkcHdqcWN2cng0Y2N0cmNmN21vYXVzMiZlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/3rXs5J0hZkXwTZjuvM/giphy.gif"
 GIF_LOGMEIN_OCUPADO = "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjFvczlzd3ExMWc2cWJrZ3EwNmplM285OGFqOHE1MXlzdnd4cndibiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/mcsPU3SkKrYDdW3aAU/giphy.gif"
-BASTAO_EMOJI = "🥂" 
-PUG2026_FILENAME = "pug2026.png"
-APP_URL_CLOUD = 'https://controle-bastao-cesupe.streamlit.app'
+BASTAO_EMOJI = "🔥" 
+PUG2026_FILENAME = "pug2026.png" # Nome do arquivo local se existir
+APP_URL_CLOUD = 'https://controle-bastao-equipe1.streamlit.app'
 
 # Secrets
 CHAT_WEBHOOK_BASTAO = get_secret("chat", "bastao")
@@ -735,7 +735,7 @@ def send_daily_report_to_webhook():
 # ============================================
 # 8. INTERFACE
 # ============================================
-st.set_page_config(page_title="Controle Bastão Cesupe 2026", layout="wide", page_icon="🥂")
+st.set_page_config(page_title="Controle Bastão Equipe 1", layout="wide", page_icon="🔥")
 st.markdown("""<style>div.stButton > button {width: 100%; white-space: nowrap; height: 3rem;} [data-testid='stHorizontalBlock'] div.stButton > button {white-space: nowrap; height: 3rem;}</style>""", unsafe_allow_html=True)
 init_session_state(); auto_manage_time()
 st.components.v1.html("<script>window.scrollTo(0, 0);</script>", height=0)
@@ -744,7 +744,7 @@ st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db()
 c_topo_esq, c_topo_dir = st.columns([2, 1], vertical_alignment="bottom")
 with c_topo_esq:
     img = get_img_as_base64_cached(PUG2026_FILENAME); src = f"data:image/png;base64,{img}" if img else GIF_BASTAO_HOLDER
-    st.markdown(f"""<div style="display: flex; align-items: center; gap: 15px;"><h1 style="margin: 0; padding: 0; font-size: 2.2rem; color: #FFD700; text-shadow: 1px 1px 2px #B8860B;">Controle Bastão Cesupe 2026 {BASTAO_EMOJI}</h1><img src="{src}" style="width: 120px; height: 120px; border-radius: 50%; border: 3px solid #FFD700; object-fit: cover;"></div>""", unsafe_allow_html=True)
+    st.markdown(f"""<div style="display: flex; align-items: center; gap: 15px;"><h1 style="margin: 0; padding: 0; font-size: 2.2rem; color: #FF4500; text-shadow: 1px 1px 2px #333;">Controle Bastão (Equipe ID 1) {BASTAO_EMOJI}</h1><img src="{src}" style="width: 100px; height: 100px; border-radius: 50%; border: 3px solid #FF4500; object-fit: cover;"></div>""", unsafe_allow_html=True)
 
 # ----------------- PAINEL LOGMEIN (NOVO) -----------------
 with st.container(border=True):
@@ -772,7 +772,7 @@ with st.container(border=True):
                 st.info("Selecione seu nome para assumir.")
 # ---------------------------------------------------------
 
-st.markdown("<hr style='border: 1px solid #FFD700; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
+st.markdown("<hr style='border: 1px solid #FF4500; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
 if st.session_state.active_view is None: pass 
 else: st.caption("⏸️ Atualização automática pausada durante o registro.")
@@ -787,7 +787,7 @@ proximo = queue[prox_idx] if prox_idx != -1 else None
 with col_principal:
     st.header("Responsável pelo Bastão")
     if responsavel:
-        st.markdown(f"""<div style="background: linear-gradient(135deg, #FFF8DC 0%, #FFFFFF 100%); border: 3px solid #FFD700; padding: 25px; border-radius: 15px; display: flex; align-items: center; box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3); margin-bottom: 20px;"><div style="flex-shrink: 0; margin-right: 25px;"><img src="{GIF_BASTAO_HOLDER}" style="width: 90px; height: 90px; border-radius: 50%; object-fit: cover; border: 2px solid #FFD700;"></div><div><span style="font-size: 14px; color: #555; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px;">Atualmente com:</span><br><span style="font-size: 42px; font-weight: 800; color: #000080; line-height: 1.1;">{responsavel}</span></div></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div style="background: linear-gradient(135deg, #FFEFD5 0%, #FFFFFF 100%); border: 3px solid #FF4500; padding: 25px; border-radius: 15px; display: flex; align-items: center; box-shadow: 0 4px 15px rgba(255, 69, 0, 0.3); margin-bottom: 20px;"><div style="flex-shrink: 0; margin-right: 25px;"><img src="{GIF_BASTAO_HOLDER}" style="width: 90px; height: 90px; border-radius: 50%; object-fit: cover; border: 2px solid #FF4500;"></div><div><span style="font-size: 14px; color: #555; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px;">Atualmente com:</span><br><span style="font-size: 42px; font-weight: 800; color: #8B0000; line-height: 1.1;">{responsavel}</span></div></div>""", unsafe_allow_html=True)
         dur = get_brazil_time() - (st.session_state.bastao_start_time or get_brazil_time())
         st.caption(f"⏱️ Tempo com o bastão: **{format_time_duration(dur)}**")
     else: st.markdown('<h2>(Ninguém com o bastão)</h2>', unsafe_allow_html=True)
@@ -814,7 +814,7 @@ with col_principal:
     with c_nome:
         st.selectbox('Selecione:', ['Selecione um nome'] + CONSULTORES, key='consultor_selectbox', label_visibility='collapsed')
     with c_act1:
-        st.button("🥂 Entrar/Sair Fila", on_click=toggle_presence_btn, use_container_width=True)
+        st.button("🔥 Entrar/Sair Fila", on_click=toggle_presence_btn, use_container_width=True)
     with c_act2:
         st.button('🎯 Passar', on_click=rotate_bastao, use_container_width=True)
     with c_act3:
@@ -1082,7 +1082,7 @@ with col_disponibilidade:
             skip_flag = skips.get(nome, False); status_atual = st.session_state.status_texto.get(nome, '') or ''; extra = ''
             if 'Atividade' in status_atual: extra += ' 📋'
             if 'Projeto' in status_atual: extra += ' 🏗️'
-            if nome == responsavel: display = f'<span style="background-color: #FFD700; color: #000; padding: 2px 6px; border-radius: 5px; font-weight: 800;">🥂 {nome}</span>'
+            if nome == responsavel: display = f'<span style="background-color: #FFEFD5; color: #8B0000; padding: 2px 6px; border-radius: 5px; font-weight: 800;">🔥 {nome}</span>'
             elif skip_flag: display = f'<strong>{i}º {nome}</strong>{extra} <span style="background-color: #FFECB3; padding: 2px 8px; border-radius: 10px;">Pulando ⏭️</span>'
             else: display = f'<strong>{i}º {nome}</strong>{extra} <span style="background-color: #BBDEFB; padding: 2px 8px; border-radius: 10px;">Aguardando</span>'
             col_nome.markdown(display, unsafe_allow_html=True)
