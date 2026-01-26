@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
 import json
@@ -29,7 +29,7 @@ from utils import (get_brazil_time, get_secret, send_to_chat)
 # 1. CONFIGURAÇÕES E CONSTANTES
 # ============================================
 CONSULTORES = sorted([
-   "Alex Paulo", "Dirceu Gonçalves", "Douglas De Souza", "Farley Leandro", "Gleis Da Silva", 
+  "Alex Paulo", "Dirceu Gonçalves", "Douglas De Souza", "Farley Leandro", "Gleis Da Silva", 
     "Hugo Leonardo", "Igor Dayrell", "Jerry Marcos", "Jonatas Gomes", "Leandro Victor", 
     "Luiz Henrique", "Marcelo Dos Santos", "Marina Silva", "Marina Torres", "Vanessa Ligiane"
 ])
@@ -52,33 +52,32 @@ CHAT_WEBHOOK_BASTAO = get_secret("chat", "bastao")
 WEBHOOK_STATE_DUMP = get_secret("webhook", "test_state")
 
 # ============================================
-# 2. OTIMIZAÇÃO DE MEMÓRIA (CACHES)
+# 2. OTIMIZAÇÃO E CONEXÃO
 # ============================================
 
-# REMOVIDO @st.cache_resource DAQUI PARA GARANTIR CONEXÃO SEMPRE NOVA
 def get_supabase():
     try: 
         return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
-    except: 
+    except Exception as e:
+        st.error(f"Erro Conexão DB: {e}") 
         return None
 
-# MANTIDO CACHE NO GRÁFICO (PESADO)
 @st.cache_data(ttl=86400, show_spinner=False)
 def carregar_dados_grafico():
     sb = get_supabase()
     if not sb: return None, None
     try:
-        res = sb.table("atendimentos_resumo").select("data").eq("id", 2).execute()
+        # --- ID ALTERADO PARA 1 ---
+        res = sb.table("atendimentos_resumo").select("data").eq("id", 1).execute()
         if res.data:
             json_data = res.data[0]['data']
             if 'totais_por_relatorio' in json_data:
                 df = pd.DataFrame(json_data['totais_por_relatorio'])
                 return df, json_data.get('gerado_em', '-')
     except Exception as e:
-        print(f"Erro ao carregar gráfico: {e}")
+        st.error(f"Erro gráfico: {e}")
     return None, None
 
-# MANTIDO CACHE NA IMAGEM (IO DE DISCO)
 @st.cache_data
 def get_img_as_base64_cached(file_path):
     try:
@@ -88,27 +87,45 @@ def get_img_as_base64_cached(file_path):
     except: return None
 
 # ============================================
-# 3. REPOSITÓRIO (INLINE - SEM DEPENDÊNCIAS EXTERNAS)
+# 3. REPOSITÓRIO (COM TRATAMENTO DE TIMEDELTA)
 # ============================================
+
+def clean_data_for_db(obj):
+    if isinstance(obj, dict):
+        return {k: clean_data_for_db(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_data_for_db(i) for i in obj]
+    elif isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    elif isinstance(obj, timedelta):
+        return obj.total_seconds()
+    else:
+        return obj
+
 def load_state_from_db():
     sb = get_supabase()
     if not sb: return {}
     try:
-        response = sb.table("app_state").select("state_data").eq("id", 1).execute()
+        # --- ID ALTERADO PARA 1 ---
+        response = sb.table("app_state").select("data").eq("id", 1).execute()
         if response.data and len(response.data) > 0:
-            return response.data[0].get("state_data", {})
+            return response.data[0].get("data", {})
         return {}
     except Exception as e:
-        print(f"Erro load: {e}")
+        st.error(f"⚠️ Erro ao ler DB: {e}")
         return {}
 
 def save_state_to_db(state_data):
     sb = get_supabase()
-    if not sb: return
+    if not sb: 
+        st.error("Sem conexão para salvar.")
+        return
     try:
-        sb.table("app_state").upsert({"id": 1, "state_data": state_data}).execute()
+        sanitized_data = clean_data_for_db(state_data)
+        # --- ID ALTERADO PARA 1 ---
+        sb.table("app_state").upsert({"id": 1, "data": sanitized_data}).execute()
     except Exception as e:
-        print(f"Erro save: {e}")
+        st.error(f"🔥 ERRO DE ESCRITA NO BANCO: {e}")
 
 # ============================================
 # 4. FUNÇÕES DE UTILIDADE E IP
@@ -204,7 +221,7 @@ def gerar_docx_certidao_internal(tipo, numero, data, consultor, motivo, chamado=
         
         if tipo == 'Geral': doc.add_paragraph("Assunto: Notifica erro no \"JPe – 2ª Instância\" ao peticionar")
         else: doc.add_paragraph("Assunto: Notifica erro no \"JPe – 2ª Instância\" ao peticionar.")
-             
+              
         doc.add_paragraph(f"\nExmo(a). Senhor(a) Relator(a),\n")
         corpo = doc.add_paragraph(); corpo.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         
@@ -245,11 +262,9 @@ def send_chat_notification_internal(consultor, status):
 def send_state_dump_webhook(state_data):
     if not WEBHOOK_STATE_DUMP: return False
     try:
-        def json_serial(obj):
-            if isinstance(obj, (datetime, datetime.date)): return obj.isoformat()
-            raise TypeError ("Type not serializable")
+        sanitized_data = clean_data_for_db(state_data)
         headers = {'Content-Type': 'application/json'}
-        requests.post(WEBHOOK_STATE_DUMP, data=json.dumps(state_data, default=json_serial), headers=headers, timeout=5)
+        requests.post(WEBHOOK_STATE_DUMP, data=json.dumps(sanitized_data), headers=headers, timeout=5)
         return True
     except: return False
 
@@ -280,7 +295,6 @@ def handle_erro_novidade_submission(consultor, titulo, objetivo, relato, resulta
     except: return False
 
 def send_sessao_to_chat_fn(consultor, texto_mensagem):
-    # Não envia, conforme solicitado
     return True
 
 def handle_sugestao_submission(consultor, texto):
@@ -296,7 +310,6 @@ def handle_sugestao_submission(consultor, texto):
 def save_state():
     try:
         last_run = st.session_state.report_last_run_date
-        last_run_iso = last_run.isoformat() if isinstance(last_run, datetime) else datetime.min.isoformat()
         visual_queue_calculated = get_ordered_visual_queue(st.session_state.bastao_queue, st.session_state.status_texto)
         
         state_to_save = {
@@ -304,9 +317,12 @@ def save_state():
             'visual_queue': visual_queue_calculated, 'skip_flags': st.session_state.skip_flags, 
             'current_status_starts': st.session_state.current_status_starts,
             'bastao_counts': st.session_state.bastao_counts, 'priority_return_queue': st.session_state.priority_return_queue,
-            'bastao_start_time': st.session_state.bastao_start_time, 'report_last_run_date': last_run_iso, 
-            'rotation_gif_start_time': st.session_state.get('rotation_gif_start_time'), 'auxilio_ativo': st.session_state.get('auxilio_ativo', False), 
-            'daily_logs': st.session_state.daily_logs, 'simon_ranking': st.session_state.get('simon_ranking', []),
+            'bastao_start_time': st.session_state.bastao_start_time, 
+            'report_last_run_date': last_run, 
+            'rotation_gif_start_time': st.session_state.get('rotation_gif_start_time'), 
+            'auxilio_ativo': st.session_state.get('auxilio_ativo', False), 
+            'daily_logs': st.session_state.daily_logs, 
+            'simon_ranking': st.session_state.get('simon_ranking', []),
             'previous_states': st.session_state.get('previous_states', {})
         }
         save_state_to_db(state_to_save)
@@ -356,10 +372,6 @@ def log_status_change(consultor, old_status, new_status, duration):
     st.session_state.current_status_starts[consultor] = now_br
 
 def update_status(novo_status: str, marcar_indisponivel: bool = False, manter_fila_atual: bool = False):
-    """
-    manter_fila_atual: Se True, não força entrada nem saída da fila. Mantém o estado atual.
-    Usado para 'Atividades' e 'Projetos' quando a pessoa já está no bastão.
-    """
     selected = st.session_state.get('consultor_selectbox')
     if not selected or selected == 'Selecione um nome': st.warning('Selecione um(a) consultor(a).'); return
     
@@ -369,7 +381,6 @@ def update_status(novo_status: str, marcar_indisponivel: bool = False, manter_fi
     forced_successor = None
     current_holder = next((c for c, s in st.session_state.status_texto.items() if 'Bastão' in (s or '')), None)
     
-    # === MEMÓRIA DE STATUS (Para retorno de Almoço) ===
     if novo_status == 'Almoço':
         st.session_state.previous_states[selected] = {
             'status': current,
@@ -504,7 +515,8 @@ def init_session_state():
         current_status = st.session_state.status_texto.get(nome, 'Indisponível')
         if current_status is None: current_status = 'Indisponível'
         st.session_state.status_texto[nome] = current_status
-        blocking = ['Almoço', 'Ausente', 'Saída rápida', 'Sessão', 'Reunião', 'Treinamento', 'Atendimento Presencial']
+        # REMOVIDO "Ausente" da lista de bloqueio visual (ainda é string válida, mas não tem UI especial)
+        blocking = ['Almoço', 'Saída rápida', 'Sessão', 'Reunião', 'Treinamento', 'Atendimento Presencial']
         is_hard_blocked = any(kw in current_status for kw in blocking)
         if is_hard_blocked: is_available = False
         elif nome in st.session_state.priority_return_queue: is_available = False
@@ -772,7 +784,10 @@ with col_principal:
     r3c1, r3c2, r3c3, r3c4 = st.columns(4)
     r3c1.button('🎙️ Sessão', on_click=toggle_view, args=('menu_sessao',), use_container_width=True)
     r3c2.button('🚶 Saída', on_click=update_status, args=('Saída rápida', True), use_container_width=True)
-    r3c3.button('🏃 Sair Bastão', on_click=update_status, args=('Ausente', True), use_container_width=True)
+    
+    # BOTÃO SAIR GERAL -> JOGA PARA INDISPONÍVEL E TIRA DA FILA
+    r3c3.button('🏃 Sair', on_click=update_status, args=('Indisponível', True), use_container_width=True)
+    
     if r3c4.button("🤝 Atend. Presencial", use_container_width=True): toggle_view('menu_presencial')
 
     # --- MENUS DE AÇÃO ---
@@ -998,7 +1013,7 @@ with col_disponibilidade:
         status = st.session_state.status_texto.get(nome, 'Indisponível'); status = status if status is not None else 'Indisponível'
         if status in ('', None): pass
         elif status == 'Almoço': ui_lists['almoco'].append(nome)
-        elif status == 'Ausente': ui_lists['ausente'].append(nome)
+        # REMOVIDO CHECK DE 'Ausente'
         elif status == 'Saída rápida': ui_lists['saida'].append(nome)
         elif status == 'Indisponível' and nome not in st.session_state.bastao_queue: ui_lists['indisponivel'].append(nome)
         if isinstance(status, str):
@@ -1017,7 +1032,6 @@ with col_disponibilidade:
         for i, nome in enumerate(render_order):
             if nome not in ui_lists['fila']: continue
             col_nome, col_check = st.columns([0.85, 0.15], vertical_alignment='center')
-            # CHECKBOX AGORA É APENAS VISUAL (DISABLED), CONTROLE PELO BOTÃO BASTÃO
             col_check.checkbox(' ', key=f'chk_fila_{nome}', value=True, disabled=True, label_visibility='collapsed')
             skip_flag = skips.get(nome, False); status_atual = st.session_state.status_texto.get(nome, '') or ''; extra = ''
             if 'Atividade' in status_atual: extra += ' 📋'
@@ -1052,5 +1066,5 @@ with col_disponibilidade:
     _render_section('Almoço', '🍽️', ui_lists['almoco'], 'red', 'Almoço')
     _render_section('Sessão', '🎙️', ui_lists['sessao_especifica'], 'green', 'Sessão')
     _render_section('Saída rápida', '🚶', ui_lists['saida'], 'red', 'Saída rápida')
-    _render_section('Ausente', '👤', ui_lists['ausente'], 'violet', 'Ausente')
+    # REMOVIDO RENDER SECTION 'Ausente'
     _render_section('Indisponível', '❌', ui_lists['indisponivel'], 'grey', '')
