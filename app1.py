@@ -199,37 +199,55 @@ def get_ordered_visual_queue(queue, status_dict):
     except ValueError: return list(queue)
 
 # ============================================
-# 5. LÓGICA DE BANCO / CERTIDÃO / LOGS
+# 5. LÓGICA DE BANCO / CERTIDÃO / LOGS (ATUALIZADO)
 # ============================================
-def verificar_duplicidade_certidao(tipo, n_processo=None, data_evento=None, hora_periodo=None):
+
+def verificar_duplicidade_certidao(tipo, processo=None, data=None):
     sb = get_supabase()
     if not sb: return False
     try:
-        query = sb.table("certidoes_registro").select("*").eq("tipo", tipo)
-        if tipo in ['Física', 'Eletrônica'] and n_processo:
-            proc_limpo = str(n_processo).strip().rstrip('.')
+        query = sb.table("certidoes_registro").select("*")
+        # Se for Física ou Eletrônica, verifica duplicidade pelo número do processo
+        if tipo in ['Físico', 'Eletrônico', 'Física', 'Eletrônica'] and processo:
+            proc_limpo = str(processo).strip()
             if not proc_limpo: return False
-            response = query.ilike("n_processo", f"%{proc_limpo}%").execute()
+            response = query.eq("processo", proc_limpo).execute()
             return len(response.data) > 0
-        elif tipo == 'Geral' and data_evento:
-            data_str = data_evento.isoformat() if hasattr(data_evento, 'isoformat') else str(data_evento)
-            query = query.eq("data_evento", data_str)
-            if hora_periodo: query = query.eq("hora_periodo", hora_periodo)
-            response = query.execute()
-            return len(response.data) > 0
-    except: return False
-    return False
+        return False
+    except Exception as e:
+        print(f"Erro duplicidade: {e}")
+        return False
 
 def salvar_certidao_db(dados):
     sb = get_supabase()
     if not sb: return False
     try:
-        dados['device_id'] = st.session_state.get('device_id_val', 'unknown')
+        # Garante formato ISO para data
+        if isinstance(dados.get('data'), (date, datetime)):
+            dados['data'] = dados['data'].isoformat()
+            
+        # Remove 'hora_periodo' pois não existe coluna no banco, concatena no motivo se houver
+        if 'hora_periodo' in dados:
+            if dados['hora_periodo']:
+                dados['motivo'] = f"{dados.get('motivo', '')} - Hora/Período: {dados['hora_periodo']}"
+            del dados['hora_periodo']
+
+        # Mapeamento de campos legados se existirem
+        if 'n_processo' in dados: 
+            dados['processo'] = dados.pop('n_processo')
+        if 'n_chamado' in dados: 
+            dados['incidente'] = dados.pop('n_chamado')
+        if 'data_evento' in dados:
+            dados['data'] = dados.pop('data_evento')
+
+        # Inserção
         sb.table("certidoes_registro").insert(dados).execute()
         return True
-    except: return False
+    except Exception as e:
+        st.error(f"Erro ao salvar no Supabase: {e}")
+        return False
 
-def gerar_docx_certidao_internal(tipo, numero, data, consultor, motivo, chamado="", hora=""):
+def gerar_docx_certidao_internal(tipo, numero, data, consultor, motivo, chamado="", hora="", nome_parte=""):
     try:
         doc = Document()
         section = doc.sections[0]
@@ -244,35 +262,58 @@ def gerar_docx_certidao_internal(tipo, numero, data, consultor, motivo, chamado=
         head_p.add_run("Rua Ouro Preto, N° 1564 - Bairro Santo Agostinho - CEP 30170-041 - Belo Horizonte - MG\nwww.tjmg.jus.br - Andar: 3º e 4º PV")
         doc.add_paragraph("\n")
         
-        if tipo == 'Geral': p_num = doc.add_paragraph(f"Parecer GEJUD/DIRTEC/TJMG nº ____/2026.")
-        else: p_num = doc.add_paragraph(f"Parecer Técnico GEJUD/DIRTEC/TJMG nº ____/2026.")
+        # Numeração e Assunto
+        if tipo == 'Geral': p_num = doc.add_paragraph(f"Parecer GEJUD/DIRTEC/TJMG nº ____/2026. Assunto: Notifica erro no “JPe – 2ª Instância” ao peticionar.")
+        else: p_num = doc.add_paragraph(f"Parecer Técnico GEJUD/DIRTEC/TJMG nº ____/2026. Assunto: Notifica erro no “JPe – 2ª Instância” ao peticionar.")
         p_num.runs[0].bold = True
         
-        if tipo == 'Geral': doc.add_paragraph("Assunto: Notifica erro no \"JPe – 2ª Instância\" ao peticionar")
-        else: doc.add_paragraph("Assunto: Notifica erro no \"JPe – 2ª Instância\" ao peticionar.")
+        # Data por extenso (Estilo do Modelo)
+        data_extenso_str = ""
+        try:
+            dt_obj = datetime.strptime(data, "%d/%m/%Y")
+            meses = {1:'janeiro', 2:'fevereiro', 3:'março', 4:'abril', 5:'maio', 6:'junho', 
+                     7:'julho', 8:'agosto', 9:'setembro', 10:'outubro', 11:'novembro', 12:'dezembro'}
+            data_extenso_str = f"Belo Horizonte, {dt_obj.day} de {meses[dt_obj.month]} de {dt_obj.year}"
+        except:
+            data_extenso_str = f"Belo Horizonte, {data}" 
+            
+        doc.add_paragraph(data_extenso_str)
               
-        doc.add_paragraph(f"\nExmo(a). Senhor(a) Relator(a),\n")
-        corpo = doc.add_paragraph(); corpo.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        doc.add_paragraph(f"Exmo(a). Senhor(a) Relator(a),")
         
         if tipo == 'Geral':
+            corpo = doc.add_paragraph(); corpo.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             txt = (f"Para fins de cumprimento dos artigos 13 e 14 da Resolução nº 780/2014 do Tribunal de Justiça do Estado de Minas Gerais, "
                    f"informamos que em {data} houve indisponibilidade do portal JPe, superior a uma hora, {hora}, que impossibilitou o peticionamento eletrônico de recursos em processos que já tramitavam no sistema.")
             corpo.add_run(txt)
             doc.add_paragraph("\nColocamo-nos à disposição para outras que se fizerem necessárias.")
             
-        elif tipo == 'Eletrônica':
-            corpo.add_run(f"Informamos que de {data}, houve indisponibilidade específica do sistema para o peticionamento do processo nº {numero}.\n\n")
+        elif tipo in ['Eletrônica', 'Eletrônico']:
+            corpo = doc.add_paragraph(); corpo.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            corpo.add_run(f"Informamos que de {data}, houve indisponibilidade específica do sistema para o peticionamento do processo nº {numero}")
+            if nome_parte: corpo.add_run(f", Parte/Advogado: {nome_parte}")
+            corpo.add_run(".\n\n")
             corpo.add_run(f"O Chamado de número {chamado if chamado else '_____'}, foi aberto e encaminhado à DIRTEC (Diretoria Executiva de Tecnologia da Informação e Comunicação).\n\n")
             corpo.add_run("Esperamos ter prestado as informações solicitadas e colocamo-nos à disposição para outras que se fizerem necessárias.")
 
-        elif tipo == 'Física':
-            corpo.add_run(f"Informamos que no dia {data}, houve indisponibilidade específica do sistema para o peticionamento do processo nº {numero}.\n\n")
-            corpo.add_run(f"O Chamado de número {chamado if chamado else '_____'}, foi aberto e encaminhado à DIRTEC (Diretoria Executiva de Tecnologia da Informação e Comunicação).\n\n")
-            corpo.add_run("Diante da indisponibilidade específica, não havendo um prazo para solução do problema, a Primeira Vice-Presidência recomenda o ingresso dos autos físicos, nos termos do § 2º, do artigo 14º, da Resolução nº 780/2014, do Tribunal de Justiça do Estado de Minas Gerais.")
-            doc.add_paragraph("\nColocamo-nos à disposição para outras informações que se fizerem necessárias.")
+        elif tipo in ['Física', 'Físico']:
+            # Modelo exato solicitado
+            corpo1 = doc.add_paragraph(); corpo1.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            corpo1.add_run(f"Informamos que no dia {data}, houve indisponibilidade específica do sistema para o peticionamento do processo nº {numero}")
+            if nome_parte: corpo1.add_run(f", Parte/Advogado: {nome_parte}")
+            corpo1.add_run(".")
+            
+            corpo2 = doc.add_paragraph(); corpo2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            corpo2.add_run(f"O Chamado de número {chamado if chamado else '_____'}, foi aberto e encaminhado à DIRTEC (Diretoria Executiva de Tecnologia da Informação e Comunicação).")
+            
+            corpo3 = doc.add_paragraph(); corpo3.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            corpo3.add_run("Diante da indisponibilidade específica, não havendo um prazo para solução do problema, a Primeira Vice-Presidência recomenda o ingresso dos autos físicos, nos termos do § 2º, do artigo 14º, da Resolução nº 780/2014, do Tribunal de Justiça do Estado de Minas Gerais.")
+            
+            doc.add_paragraph("Colocamo-nos à disposição para outras informações que se fizerem necessárias.")
 
         doc.add_paragraph("\nRespeitosamente,")
-        doc.add_paragraph("\n\n___________________________________\nWaner Andrade Silva\n0-009020-9\nCoordenação de Análise e Integração de Sistemas Judiciais Informatizados - COJIN\nGerência de Sistemas Judiciais - GEJUD\nDiretoria Executiva de Tecnologia da Informação e Comunicação - DIRTEC")
+        sign = doc.add_paragraph("\n___________________________________\nWaner Andrade Silva\n0-009020-9\nCoordenação de Análise e Integração de Sistemas Judiciais Informatizados - COJIN\nGerência de Sistemas Judiciais - GEJUD\nDiretoria Executiva de Tecnologia da Informação e Comunicação - DIRTEC")
+        sign.runs[0].bold = True 
         
         buffer = io.BytesIO(); doc.save(buffer); buffer.seek(0)
         return buffer
@@ -436,7 +477,6 @@ def update_status(novo_status: str, marcar_indisponivel: bool = False, manter_fi
 
     # 2. Se for "Atividades" ou "Projeto", MANTÉM NA FILA se já estiver.
     elif manter_fila_atual:
-        # Não faz nada com a fila, apenas atualiza texto.
         pass 
     
     # 3. Se for entrar na fila (lógica do botão toggle_queue), ZERA o status. (Feito na função toggle_queue)
@@ -1031,28 +1071,65 @@ with col_principal:
 
     if st.session_state.active_view == "certidao":
         with st.container(border=True):
-            st.header("🖨️ Registro de Certidão (2026)"); tipo_cert = st.selectbox("Tipo:", ["Física", "Eletrônica", "Geral"]); c_data = st.date_input("Data do Evento:", value=get_brazil_time().date())
+            st.header("🖨️ Registro de Certidão (2026)")
+            # Correção 1: Formato data DD/MM/YYYY
+            c_data = st.date_input("Data do Evento:", value=get_brazil_time().date(), format="DD/MM/YYYY")
+            tipo_cert = st.selectbox("Tipo:", ["Física", "Eletrônica", "Geral"])
             c_cons = st.session_state.consultor_selectbox
-            if tipo_cert == "Geral": c_hora = st.text_input("Horário/Período:"); c_motivo = st.text_input("Motivo:"); c_proc = ""; c_chamado = ""
-            else: c_hora = ""; c1, c2 = st.columns(2); c_chamado = c1.text_input("Chamado:"); c_proc = c2.text_input("Processo:"); c_motivo = st.text_area("Motivo:")
+            
+            # Campos comuns
+            c_hora = "" # Mantido localmente para o DOCX se necessário, mas não vai pro DB como coluna separada
+            c_motivo = st.text_area("Motivo/Detalhes:", height=100)
+            
+            # Condicionais
+            if tipo_cert == "Geral": 
+                c_hora = st.text_input("Horário/Período (Ex: 13h às 15h):")
+                # Se for geral, não tem processo específico obrigatório, mas vamos manter vazio
+                c_proc = ""; c_chamado = ""; c_nome_parte = ""; c_peticao = ""
+                # Concatena hora no motivo para salvar no banco
+                if c_hora: c_motivo = f"{c_motivo} - Período: {c_hora}"
+            else: 
+                c1, c2 = st.columns(2)
+                c_proc = c1.text_input("Processo (Com pontuação):")
+                c_chamado = c2.text_input("Incidente/Chamado:")
+                
+                c3, c4 = st.columns(2)
+                c_nome_parte = c3.text_input("Nome da Parte/Advogado:")
+                c_peticao = c4.selectbox("Tipo de Petição:", ["Inicial", "Recursal", "Intermediária", "Outros"])
             
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("📄 Gerar Word", use_container_width=True): st.session_state.word_buffer = gerar_docx_certidao_internal(tipo_cert, c_proc, c_data.strftime("%d/%m/%Y"), c_cons, c_motivo, c_chamado, c_hora)
-                if st.session_state.word_buffer: st.download_button("⬇️ Baixar", st.session_state.word_buffer, file_name="certidao.docx")
+                # Gerar Word usa os dados locais para preencher o modelo
+                if st.button("📄 Gerar Word", use_container_width=True): 
+                    st.session_state.word_buffer = gerar_docx_certidao_internal(tipo_cert, c_proc, c_data.strftime("%d/%m/%Y"), c_cons, c_motivo, c_chamado, c_hora, c_nome_parte)
+                if st.session_state.word_buffer: 
+                    st.download_button("⬇️ Baixar", st.session_state.word_buffer, file_name="certidao.docx")
             with c2:
                 if st.button("💾 Salvar e Notificar", type="primary", use_container_width=True):
-                    if verificar_duplicidade_certidao(tipo_cert, c_proc, c_data, c_hora): st.session_state.aviso_duplicidade = True
+                    # Validação de Duplicidade corrigida (pela coluna PROCESSO)
+                    if verificar_duplicidade_certidao(tipo_cert, c_proc, c_data): 
+                        st.session_state.aviso_duplicidade = True
                     else:
-                        payload = {"tipo": tipo_cert, "data_evento": c_data.isoformat(), "consultor": c_cons, "n_chamado": c_chamado, "n_processo": c_proc, "motivo": c_motivo, "hora_periodo": c_hora}
+                        # Payload corrigido para o banco 'certidoes_registro'
+                        payload = {
+                            "tipo": tipo_cert, 
+                            "data": c_data.isoformat(), 
+                            "consultor": c_cons, 
+                            "incidente": c_chamado, # Mapeia chamado -> incidente
+                            "processo": c_proc, 
+                            "motivo": c_motivo,
+                            "nome_parte": c_nome_parte,
+                            "peticao": c_peticao
+                        }
                         if salvar_certidao_db(payload):
-                            msg_cert = f"🖨️ **Nova Certidão Registrada**\n👤 **Autor:** {c_cons}\n📅 **Data:** {c_data.strftime('%d/%m/%Y')}\n📄 **Tipo:** {tipo_cert}"
+                            msg_cert = f"🖨️ **Nova Certidão Registrada**\n👤 **Autor:** {c_cons}\n📅 **Data:** {c_data.strftime('%d/%m/%Y')}\n📄 **Tipo:** {tipo_cert}\n📂 **Proc:** {c_proc}"
                             try: send_to_chat("certidao", msg_cert)
                             except Exception as e: st.error(f"Erro Webhook: {e}")
                             st.success("Salvo!"); time.sleep(1); st.session_state.active_view = None; st.session_state.word_buffer = None; st.rerun()
                         else: st.error("Erro ao salvar no banco.")
+            
             if st.button("❌ Cancelar"): st.session_state.active_view = None; st.rerun()
-            if st.session_state.get('aviso_duplicidade'): st.error("Registro já existe!"); st.button("Ok", on_click=st.rerun)
+            if st.session_state.get('aviso_duplicidade'): st.error("⚠️ Este processo já possui registro de certidão!"); st.button("Ok, entendi", on_click=st.rerun)
 
     if st.session_state.active_view == "sugestao":
         with st.container(border=True):
