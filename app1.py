@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
-import gc  # <--- NOVA IMPORTAÇÃO PARA LIMPEZA DE MEMÓRIA
+import gc  # <--- IMPORTAÇÃO PARA LIMPEZA DE MEMÓRIA
 from datetime import datetime, timedelta, date
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
@@ -881,7 +881,7 @@ with c_topo_dir:
 
 st.markdown("<hr style='border: 1px solid #FF8C00; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
-if st.session_state.active_view is None: st_autorefresh(interval=60000, key='auto_rerun'); sync_state_from_db() # <--- AUMENTADO PARA 60s
+if st.session_state.active_view is None: st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db() # <--- VOLTADO PARA 20s
 else: st.caption("⏸️ Atualização automática pausada durante o registro.")
 
 col_principal, col_disponibilidade = st.columns([1.5, 1])
