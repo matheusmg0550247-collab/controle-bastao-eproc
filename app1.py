@@ -49,7 +49,7 @@ OPCOES_ATIVIDADES_STATUS = ["HP", "E-mail", "WhatsApp Plantão", "Homologação"
 GIF_BASTAO_HOLDER = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExa3Uwazd5cnNra2oxdDkydjZkcHdqcWN2cng0Y2N0cmNmN21vYXVzMiZlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/3rXs5J0hZkXwTZjuvM/giphy.gif"
 GIF_LOGMEIN_TARGET = "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjFvczlzd3ExMWc2cWJrZ3EwNmplM285OGFqOHE1MXlzdnd4cndibiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/mcsPU3SkKrYDdW3aAU/giphy.gif"
 BASTAO_EMOJI = "🎭" 
-PUG2026_FILENAME = "Carnaval.gif" # Alterado para o GIF de Carnaval
+PUG2026_FILENAME = "Carnaval.gif" 
 APP_URL_CLOUD = 'https://controle-bastao-equipe1.streamlit.app'
 
 # Secrets
@@ -60,6 +60,8 @@ WEBHOOK_STATE_DUMP = get_secret("webhook", "test_state")
 # 2. OTIMIZAÇÃO E CONEXÃO
 # ============================================
 
+# OTIMIZAÇÃO APLICADA: @st.cache_resource
+@st.cache_resource
 def get_supabase():
     try: 
         return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
