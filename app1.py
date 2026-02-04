@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
+import gc  # <--- NOVA IMPORTAÇÃO PARA LIMPEZA DE MEMÓRIA
 from datetime import datetime, timedelta, date
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
@@ -159,7 +160,7 @@ def set_logmein_status(consultor, em_uso):
     except Exception as e: st.error(f"Erro LogMeIn DB: {e}")
 
 # ============================================
-# 4. FUNÇÕES DE UTILIDADE E IP
+# 4. FUNÇÕES DE UTILIDADE, IP E MEMÓRIA
 # ============================================
 def get_browser_id():
     if st_javascript is None: return "no_js_lib"
@@ -189,6 +190,27 @@ def get_remote_ip():
                     return request.remote_ip
     except: return "Unknown"
     return "Unknown"
+
+# --- NOVA FUNÇÃO DE LIMPEZA DE MEMÓRIA ---
+def memory_sweeper():
+    # Verifica se já temos o timer de limpeza
+    if 'last_cleanup' not in st.session_state:
+        st.session_state.last_cleanup = time.time()
+        return
+
+    # Executa a limpeza a cada 5 minutos (300 segundos)
+    if time.time() - st.session_state.last_cleanup > 300:
+        # 1. Limpa buffers pesados que podem ter ficado presos
+        st.session_state.word_buffer = None 
+        
+        # 2. Força o Python a coletar lixo da memória RAM
+        n = gc.collect()
+        
+        # 3. Atualiza o timer
+        st.session_state.last_cleanup = time.time()
+        
+        # (Debug Opcional - pode remover se quiser)
+        # print(f"🧹 Limpeza de memória executada! Objetos removidos: {n}")
 
 # --- LÓGICA DE FILA VISUAL ---
 def get_ordered_visual_queue(queue, status_dict):
@@ -413,7 +435,13 @@ def sync_state_from_db():
         if not db_data: return
         keys = ['status_texto', 'bastao_queue', 'skip_flags', 'bastao_counts', 'priority_return_queue', 'daily_logs', 'simon_ranking', 'previous_states']
         for k in keys:
-            if k in db_data: st.session_state[k] = db_data[k]
+            if k in db_data: 
+                # --- OTIMIZAÇÃO: PAGINAÇÃO NA CARGA (RAM) ---
+                if k == 'daily_logs' and isinstance(db_data[k], list) and len(db_data[k]) > 150:
+                    st.session_state[k] = db_data[k][-150:] # Mantém apenas os 150 últimos na RAM
+                else:
+                    st.session_state[k] = db_data[k]
+                    
         if 'bastao_start_time' in db_data and db_data['bastao_start_time']:
             try:
                 if isinstance(db_data['bastao_start_time'], str): st.session_state['bastao_start_time'] = datetime.fromisoformat(db_data['bastao_start_time'])
@@ -443,6 +471,11 @@ def log_status_change(consultor, old_status, new_status, duration):
         'old_status': old_lbl, 'new_status': new_lbl, 
         'duration': duration, 'ip': device_id_audit
     })
+    
+    # --- OTIMIZAÇÃO: LIMITAR TAMANHO DO LOG LOCALMENTE ---
+    if len(st.session_state.daily_logs) > 150:
+        st.session_state.daily_logs = st.session_state.daily_logs[-150:]
+        
     st.session_state.current_status_starts[consultor] = now_br
 
 # --- LÓGICA RIGOROSA DE ATUALIZAÇÃO DE STATUS ---
@@ -587,7 +620,8 @@ def init_session_state():
         'consultor_selectbox': "Selecione um nome", 'status_texto': {nome: 'Indisponível' for nome in CONSULTORES},
         'bastao_queue': [], 'skip_flags': {}, 'current_status_starts': {nome: now for nome in CONSULTORES},
         'bastao_counts': {nome: 0 for nome in CONSULTORES}, 'priority_return_queue': [], 'daily_logs': [], 'simon_ranking': [],
-        'word_buffer': None, 'aviso_duplicidade': False, 'previous_states': {}, 'view_logmein_ui': False
+        'word_buffer': None, 'aviso_duplicidade': False, 'previous_states': {}, 'view_logmein_ui': False,
+        'last_cleanup': time.time() # Default para limpeza
     }
     for key, default in defaults.items():
         if key not in st.session_state: st.session_state[key] = default
@@ -823,7 +857,7 @@ st.markdown("""
 <div class="confetti" style="left: 85%; animation-delay: 2.5s; background-color: #FF4500;"></div>
 """, unsafe_allow_html=True)
 
-init_session_state(); auto_manage_time()
+init_session_state(); memory_sweeper(); auto_manage_time() # <--- CHAMADA DE LIMPEZA AQUI
 st.components.v1.html("<script>window.scrollTo(0, 0);</script>", height=0)
 
 # Texto de conscientização - Fevereiro Laranja
@@ -847,7 +881,7 @@ with c_topo_dir:
 
 st.markdown("<hr style='border: 1px solid #FF8C00; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
-if st.session_state.active_view is None: st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db() 
+if st.session_state.active_view is None: st_autorefresh(interval=60000, key='auto_rerun'); sync_state_from_db() # <--- AUMENTADO PARA 60s
 else: st.caption("⏸️ Atualização automática pausada durante o registro.")
 
 col_principal, col_disponibilidade = st.columns([1.5, 1])
