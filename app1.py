@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
-import gc  # <--- IMPORTAÇÃO PARA LIMPEZA DE MEMÓRIA
+import gc  # Importação para limpeza de memória
 from datetime import datetime, timedelta, date
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
@@ -95,7 +95,7 @@ def get_img_as_base64_cached(file_path):
     except: return None
 
 # ============================================
-# 3. REPOSITÓRIO (COM TRATAMENTO DE TIMEDELTA)
+# 3. REPOSITÓRIO (COM CACHE INTELIGENTE)
 # ============================================
 
 def clean_data_for_db(obj):
@@ -110,6 +110,8 @@ def clean_data_for_db(obj):
     else:
         return obj
 
+# --- ALTERAÇÃO PRINCIPAL: CACHE DE LEITURA (TTL 5s) ---
+@st.cache_data(ttl=5, show_spinner=False)
 def load_state_from_db():
     sb = get_supabase()
     if not sb: return {}
@@ -191,26 +193,16 @@ def get_remote_ip():
     except: return "Unknown"
     return "Unknown"
 
-# --- NOVA FUNÇÃO DE LIMPEZA DE MEMÓRIA ---
+# --- FUNÇÃO DE LIMPEZA DE MEMÓRIA ---
 def memory_sweeper():
-    # Verifica se já temos o timer de limpeza
     if 'last_cleanup' not in st.session_state:
         st.session_state.last_cleanup = time.time()
         return
-
-    # Executa a limpeza a cada 5 minutos (300 segundos)
+    # Limpeza a cada 5 minutos
     if time.time() - st.session_state.last_cleanup > 300:
-        # 1. Limpa buffers pesados que podem ter ficado presos
         st.session_state.word_buffer = None 
-        
-        # 2. Força o Python a coletar lixo da memória RAM
-        n = gc.collect()
-        
-        # 3. Atualiza o timer
+        gc.collect()
         st.session_state.last_cleanup = time.time()
-        
-        # (Debug Opcional - pode remover se quiser)
-        # print(f"🧹 Limpeza de memória executada! Objetos removidos: {n}")
 
 # --- LÓGICA DE FILA VISUAL ---
 def get_ordered_visual_queue(queue, status_dict):
@@ -422,6 +414,10 @@ def save_state():
         }
         # Limpeza é feita dentro de save_state_to_db agora, mas podemos chamar aqui também para garantir
         save_state_to_db(state_to_save)
+        
+        # --- ALTERAÇÃO PRINCIPAL: INVALIDAÇÃO DE CACHE ---
+        load_state_from_db.clear()
+        
     except Exception as e: print(f"Erro save: {e}")
 
 def format_time_duration(duration):
@@ -431,6 +427,7 @@ def format_time_duration(duration):
 
 def sync_state_from_db():
     try:
+        # Usa a função cacheada
         db_data = load_state_from_db()
         if not db_data: return
         keys = ['status_texto', 'bastao_queue', 'skip_flags', 'bastao_counts', 'priority_return_queue', 'daily_logs', 'simon_ranking', 'previous_states']
@@ -881,7 +878,7 @@ with c_topo_dir:
 
 st.markdown("<hr style='border: 1px solid #FF8C00; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
-if st.session_state.active_view is None: st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db() # <--- VOLTADO PARA 20s
+if st.session_state.active_view is None: st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db() # <--- MANTIDO EM 20s
 else: st.caption("⏸️ Atualização automática pausada durante o registro.")
 
 col_principal, col_disponibilidade = st.columns([1.5, 1])
