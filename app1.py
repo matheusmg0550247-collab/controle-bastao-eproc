@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
-import gc
+import gc  # Importação para limpeza de memória
 from datetime import datetime, timedelta, date
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
@@ -46,7 +46,7 @@ REG_DESFECHO_OPCOES = ["Resolvido - Cesupe", "Escalonado"]
 
 OPCOES_ATIVIDADES_STATUS = ["HP", "E-mail", "WhatsApp Plantão", "Homologação", "Redação Documentos", "Outros"]
 
-# URLs e Visuais
+# URLs e Visuais (PADRÃO FEVEREIRO LARANJA / CARNAVAL)
 GIF_BASTAO_HOLDER = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExa3Uwazd5cnNra2oxdDkydjZkcHdqcWN2cng0Y2N0cmNmN21vYXVzMiZlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/3rXs5J0hZkXwTZjuvM/giphy.gif"
 GIF_LOGMEIN_TARGET = "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjFvczlzd3ExMWc2cWJrZ3EwNmplM285OGFqOHE1MXlzdnd4cndibiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/mcsPU3SkKrYDdW3aAU/giphy.gif"
 BASTAO_EMOJI = "🎭" 
@@ -58,18 +58,15 @@ CHAT_WEBHOOK_BASTAO = get_secret("chat", "bastao")
 WEBHOOK_STATE_DUMP = get_secret("webhook", "test_state")
 
 # ============================================
-# 2. OTIMIZAÇÃO E CONEXÃO (DURABILIDADE)
+# 2. OTIMIZAÇÃO E CONEXÃO
 # ============================================
 
-# ALTERAÇÃO CRÍTICA 1: TTL DE 1 HORA NA CONEXÃO
-# Isso força o Streamlit a recriar a conexão com o banco a cada hora,
-# evitando que ela fique "velha" e caia sozinha.
-@st.cache_resource(ttl=3600) 
+# TTL DE 1 HORA NA CONEXÃO (Evita desconexão por inatividade)
+@st.cache_resource(ttl=3600)
 def get_supabase():
     try: 
         return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
     except Exception as e:
-        # Se falhar, limpa o cache para tentar conectar de novo na próxima
         st.cache_resource.clear()
         st.error(f"Erro Conexão DB: {e}") 
         return None
@@ -79,6 +76,7 @@ def carregar_dados_grafico():
     sb = get_supabase()
     if not sb: return None, None
     try:
+        # ID 1
         res = sb.table("atendimentos_resumo").select("data").eq("id", DB_APP_ID).execute()
         if res.data:
             json_data = res.data[0]['data']
@@ -98,7 +96,7 @@ def get_img_as_base64_cached(file_path):
     except: return None
 
 # ============================================
-# 3. REPOSITÓRIO (COM CACHE INTELIGENTE E RESILIENTE)
+# 3. REPOSITÓRIO (CACHE ULTRA-RÁPIDO)
 # ============================================
 
 def clean_data_for_db(obj):
@@ -113,19 +111,18 @@ def clean_data_for_db(obj):
     else:
         return obj
 
-# ALTERAÇÃO CRÍTICA 2: CACHE DE LEITURA (5s)
-@st.cache_data(ttl=5, show_spinner=False)
+# CACHE DE LEITURA DE 2 SEGUNDOS (Permite refresh de 5s sem matar o banco)
+@st.cache_data(ttl=2, show_spinner=False)
 def load_state_from_db():
     sb = get_supabase()
     if not sb: return {}
     try:
+        # ID 1
         response = sb.table("app_state").select("data").eq("id", DB_APP_ID).execute()
         if response.data and len(response.data) > 0:
             return response.data[0].get("data", {})
         return {}
     except Exception as e:
-        # Se der erro de leitura, pode ser cache corrompido. Não trava, retorna vazio.
-        print(f"Erro leitura DB: {e}")
         return {}
 
 def save_state_to_db(state_data):
@@ -135,6 +132,7 @@ def save_state_to_db(state_data):
         return
     try:
         sanitized_data = clean_data_for_db(state_data)
+        # ID 1
         sb.table("app_state").upsert({"id": DB_APP_ID, "data": sanitized_data}).execute()
     except Exception as e:
         st.error(f"🔥 ERRO DE ESCRITA NO BANCO: {e}")
@@ -144,6 +142,7 @@ def get_logmein_status():
     sb = get_supabase()
     if not sb: return None, False
     try:
+        # ID LOGMEIN É SEMPRE 1 (COMPARTILHADO)
         res = sb.table("controle_logmein").select("*").eq("id", LOGMEIN_DB_ID).execute()
         if res.data:
             return res.data[0].get('consultor_atual'), res.data[0].get('em_uso', False)
@@ -194,24 +193,23 @@ def get_remote_ip():
     except: return "Unknown"
     return "Unknown"
 
-# --- ALTERAÇÃO CRÍTICA 3: LIMPEZA PROFUNDA DE MEMÓRIA ---
+# --- LIMPEZA DE MEMÓRIA ---
 def memory_sweeper():
     if 'last_cleanup' not in st.session_state:
         st.session_state.last_cleanup = time.time()
         return
-
-    # Limpeza leve a cada 5 minutos
+    # Limpeza leve (5 min)
     if time.time() - st.session_state.last_cleanup > 300:
         st.session_state.word_buffer = None 
         gc.collect()
         st.session_state.last_cleanup = time.time()
         
-    # Limpeza PESADA a cada 4 horas (evita vazamento acumulado)
+    # Limpeza PESADA (4 horas)
     if 'last_hard_cleanup' not in st.session_state:
         st.session_state.last_hard_cleanup = time.time()
         
-    if time.time() - st.session_state.last_hard_cleanup > 14400: # 4 horas
-        st.cache_data.clear() # Limpa caches de dados antigos
+    if time.time() - st.session_state.last_hard_cleanup > 14400:
+        st.cache_data.clear()
         gc.collect()
         st.session_state.last_hard_cleanup = time.time()
 
@@ -275,19 +273,16 @@ def gerar_docx_certidao_internal(tipo, numero, data, consultor, motivo, chamado=
         section.left_margin = Cm(3.0); section.right_margin = Cm(3.0)
         style = doc.styles['Normal']; style.font.name = 'Arial'; style.font.size = Pt(11)
         
-        # Cabeçalho
         head_p = doc.add_paragraph(); head_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         runner = head_p.add_run("TRIBUNAL DE JUSTIÇA DO ESTADO DE MINAS GERAIS\n")
         runner.bold = True
         head_p.add_run("Rua Ouro Preto, N° 1564 - Bairro Santo Agostinho - CEP 30170-041 - Belo Horizonte - MG\nwww.tjmg.jus.br - Andar: 3º e 4º PV")
         doc.add_paragraph("\n")
         
-        # Numeração
         if tipo == 'Geral': p_num = doc.add_paragraph(f"Parecer GEJUD/DIRTEC/TJMG nº ____/2026. Assunto: Notifica erro no “JPe – 2ª Instância” ao peticionar.")
         else: p_num = doc.add_paragraph(f"Parecer Técnico GEJUD/DIRTEC/TJMG nº ____/2026. Assunto: Notifica erro no “JPe – 2ª Instância” ao peticionar.")
         p_num.runs[0].bold = True
         
-        # Data
         data_extenso_str = ""
         try:
             dt_obj = datetime.strptime(data, "%d/%m/%Y")
@@ -414,7 +409,7 @@ def save_state():
         }
         save_state_to_db(state_to_save)
         
-        # Limpa o cache de leitura para forçar atualização imediata para todos
+        # --- INVALIDAÇÃO DE CACHE (CRÍTICO) ---
         load_state_from_db.clear()
         
     except Exception as e: print(f"Erro save: {e}")
@@ -426,12 +421,13 @@ def format_time_duration(duration):
 
 def sync_state_from_db():
     try:
-        # Usa a função com cache curto
+        # Usa a função cacheada
         db_data = load_state_from_db()
         if not db_data: return
         keys = ['status_texto', 'bastao_queue', 'skip_flags', 'bastao_counts', 'priority_return_queue', 'daily_logs', 'simon_ranking', 'previous_states']
         for k in keys:
             if k in db_data: 
+                # Paginação
                 if k == 'daily_logs' and isinstance(db_data[k], list) and len(db_data[k]) > 150:
                     st.session_state[k] = db_data[k][-150:] 
                 else:
@@ -876,7 +872,8 @@ with c_topo_dir:
 
 st.markdown("<hr style='border: 1px solid #FF8C00; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
-if st.session_state.active_view is None: st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db() # <--- VOLTADO PARA 20s
+# ALTERAÇÃO: 5000 (5s) para refresh mais rápido
+if st.session_state.active_view is None: st_autorefresh(interval=5000, key='auto_rerun'); sync_state_from_db() 
 else: st.caption("⏸️ Atualização automática pausada durante o registro.")
 
 col_principal, col_disponibilidade = st.columns([1.5, 1])
