@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
-import gc  # Importação para limpeza de memória
+import gc
 from datetime import datetime, timedelta, date
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
@@ -46,7 +46,7 @@ REG_DESFECHO_OPCOES = ["Resolvido - Cesupe", "Escalonado"]
 
 OPCOES_ATIVIDADES_STATUS = ["HP", "E-mail", "WhatsApp Plantão", "Homologação", "Redação Documentos", "Outros"]
 
-# URLs e Visuais (PADRÃO FEVEREIRO LARANJA / CARNAVAL)
+# URLs e Visuais
 GIF_BASTAO_HOLDER = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExa3Uwazd5cnNra2oxdDkydjZkcHdqcWN2cng0Y2N0cmNmN21vYXVzMiZlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/3rXs5J0hZkXwTZjuvM/giphy.gif"
 GIF_LOGMEIN_TARGET = "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjFvczlzd3ExMWc2cWJrZ3EwNmplM285OGFqOHE1MXlzdnd4cndibiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/mcsPU3SkKrYDdW3aAU/giphy.gif"
 BASTAO_EMOJI = "🎭" 
@@ -58,15 +58,19 @@ CHAT_WEBHOOK_BASTAO = get_secret("chat", "bastao")
 WEBHOOK_STATE_DUMP = get_secret("webhook", "test_state")
 
 # ============================================
-# 2. OTIMIZAÇÃO E CONEXÃO
+# 2. OTIMIZAÇÃO E CONEXÃO (DURABILIDADE)
 # ============================================
 
-# OTIMIZAÇÃO APLICADA: @st.cache_resource
-@st.cache_resource
+# ALTERAÇÃO CRÍTICA 1: TTL DE 1 HORA NA CONEXÃO
+# Isso força o Streamlit a recriar a conexão com o banco a cada hora,
+# evitando que ela fique "velha" e caia sozinha.
+@st.cache_resource(ttl=3600) 
 def get_supabase():
     try: 
         return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
     except Exception as e:
+        # Se falhar, limpa o cache para tentar conectar de novo na próxima
+        st.cache_resource.clear()
         st.error(f"Erro Conexão DB: {e}") 
         return None
 
@@ -75,7 +79,6 @@ def carregar_dados_grafico():
     sb = get_supabase()
     if not sb: return None, None
     try:
-        # ID 1
         res = sb.table("atendimentos_resumo").select("data").eq("id", DB_APP_ID).execute()
         if res.data:
             json_data = res.data[0]['data']
@@ -95,7 +98,7 @@ def get_img_as_base64_cached(file_path):
     except: return None
 
 # ============================================
-# 3. REPOSITÓRIO (COM CACHE INTELIGENTE)
+# 3. REPOSITÓRIO (COM CACHE INTELIGENTE E RESILIENTE)
 # ============================================
 
 def clean_data_for_db(obj):
@@ -110,19 +113,19 @@ def clean_data_for_db(obj):
     else:
         return obj
 
-# --- ALTERAÇÃO PRINCIPAL: CACHE DE LEITURA (TTL 5s) ---
+# ALTERAÇÃO CRÍTICA 2: CACHE DE LEITURA (5s)
 @st.cache_data(ttl=5, show_spinner=False)
 def load_state_from_db():
     sb = get_supabase()
     if not sb: return {}
     try:
-        # ID 1
         response = sb.table("app_state").select("data").eq("id", DB_APP_ID).execute()
         if response.data and len(response.data) > 0:
             return response.data[0].get("data", {})
         return {}
     except Exception as e:
-        st.error(f"⚠️ Erro ao ler DB: {e}")
+        # Se der erro de leitura, pode ser cache corrompido. Não trava, retorna vazio.
+        print(f"Erro leitura DB: {e}")
         return {}
 
 def save_state_to_db(state_data):
@@ -132,7 +135,6 @@ def save_state_to_db(state_data):
         return
     try:
         sanitized_data = clean_data_for_db(state_data)
-        # ID 1
         sb.table("app_state").upsert({"id": DB_APP_ID, "data": sanitized_data}).execute()
     except Exception as e:
         st.error(f"🔥 ERRO DE ESCRITA NO BANCO: {e}")
@@ -142,7 +144,6 @@ def get_logmein_status():
     sb = get_supabase()
     if not sb: return None, False
     try:
-        # ID LOGMEIN É SEMPRE 1 (COMPARTILHADO)
         res = sb.table("controle_logmein").select("*").eq("id", LOGMEIN_DB_ID).execute()
         if res.data:
             return res.data[0].get('consultor_atual'), res.data[0].get('em_uso', False)
@@ -193,16 +194,26 @@ def get_remote_ip():
     except: return "Unknown"
     return "Unknown"
 
-# --- FUNÇÃO DE LIMPEZA DE MEMÓRIA ---
+# --- ALTERAÇÃO CRÍTICA 3: LIMPEZA PROFUNDA DE MEMÓRIA ---
 def memory_sweeper():
     if 'last_cleanup' not in st.session_state:
         st.session_state.last_cleanup = time.time()
         return
-    # Limpeza a cada 5 minutos
+
+    # Limpeza leve a cada 5 minutos
     if time.time() - st.session_state.last_cleanup > 300:
         st.session_state.word_buffer = None 
         gc.collect()
         st.session_state.last_cleanup = time.time()
+        
+    # Limpeza PESADA a cada 4 horas (evita vazamento acumulado)
+    if 'last_hard_cleanup' not in st.session_state:
+        st.session_state.last_hard_cleanup = time.time()
+        
+    if time.time() - st.session_state.last_hard_cleanup > 14400: # 4 horas
+        st.cache_data.clear() # Limpa caches de dados antigos
+        gc.collect()
+        st.session_state.last_hard_cleanup = time.time()
 
 # --- LÓGICA DE FILA VISUAL ---
 def get_ordered_visual_queue(queue, status_dict):
@@ -215,7 +226,7 @@ def get_ordered_visual_queue(queue, status_dict):
     except ValueError: return list(queue)
 
 # ============================================
-# 5. LÓGICA DE BANCO / CERTIDÃO / LOGS (ATUALIZADO)
+# 5. LÓGICA DE BANCO / CERTIDÃO / LOGS
 # ============================================
 
 def verificar_duplicidade_certidao(tipo, processo=None, data=None):
@@ -223,7 +234,6 @@ def verificar_duplicidade_certidao(tipo, processo=None, data=None):
     if not sb: return False
     try:
         query = sb.table("certidoes_registro").select("*")
-        # Se for Física ou Eletrônica, verifica duplicidade pelo número do processo
         if tipo in ['Físico', 'Eletrônico', 'Física', 'Eletrônica'] and processo:
             proc_limpo = str(processo).strip()
             if not proc_limpo: return False
@@ -238,17 +248,12 @@ def salvar_certidao_db(dados):
     sb = get_supabase()
     if not sb: return False
     try:
-        # Garante formato ISO para data
         if isinstance(dados.get('data'), (date, datetime)):
             dados['data'] = dados['data'].isoformat()
-            
-        # Remove 'hora_periodo' pois não existe coluna no banco, concatena no motivo se houver
         if 'hora_periodo' in dados:
             if dados['hora_periodo']:
                 dados['motivo'] = f"{dados.get('motivo', '')} - Hora/Período: {dados['hora_periodo']}"
             del dados['hora_periodo']
-
-        # Mapeamento de campos legados se existirem
         if 'n_processo' in dados: 
             dados['processo'] = dados.pop('n_processo')
         if 'n_chamado' in dados: 
@@ -256,7 +261,6 @@ def salvar_certidao_db(dados):
         if 'data_evento' in dados:
             dados['data'] = dados.pop('data_evento')
 
-        # Inserção
         sb.table("certidoes_registro").insert(dados).execute()
         return True
     except Exception as e:
@@ -278,12 +282,12 @@ def gerar_docx_certidao_internal(tipo, numero, data, consultor, motivo, chamado=
         head_p.add_run("Rua Ouro Preto, N° 1564 - Bairro Santo Agostinho - CEP 30170-041 - Belo Horizonte - MG\nwww.tjmg.jus.br - Andar: 3º e 4º PV")
         doc.add_paragraph("\n")
         
-        # Numeração e Assunto
+        # Numeração
         if tipo == 'Geral': p_num = doc.add_paragraph(f"Parecer GEJUD/DIRTEC/TJMG nº ____/2026. Assunto: Notifica erro no “JPe – 2ª Instância” ao peticionar.")
         else: p_num = doc.add_paragraph(f"Parecer Técnico GEJUD/DIRTEC/TJMG nº ____/2026. Assunto: Notifica erro no “JPe – 2ª Instância” ao peticionar.")
         p_num.runs[0].bold = True
         
-        # Data por extenso (Estilo do Modelo)
+        # Data
         data_extenso_str = ""
         try:
             dt_obj = datetime.strptime(data, "%d/%m/%Y")
@@ -294,7 +298,6 @@ def gerar_docx_certidao_internal(tipo, numero, data, consultor, motivo, chamado=
             data_extenso_str = f"Belo Horizonte, {data}" 
             
         doc.add_paragraph(data_extenso_str)
-              
         doc.add_paragraph(f"Exmo(a). Senhor(a) Relator(a),")
         
         if tipo == 'Geral':
@@ -313,7 +316,6 @@ def gerar_docx_certidao_internal(tipo, numero, data, consultor, motivo, chamado=
             corpo.add_run("Esperamos ter prestado as informações solicitadas e colocamo-nos à disposição para outras que se fizerem necessárias.")
 
         elif tipo in ['Física', 'Físico']:
-            # Modelo exato solicitado
             corpo1 = doc.add_paragraph(); corpo1.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             corpo1.add_run(f"Informamos que no dia {data}, houve indisponibilidade específica do sistema para o peticionamento do processo nº {numero}")
             if nome_parte: corpo1.add_run(f", Parte/Advogado: {nome_parte}")
@@ -324,7 +326,6 @@ def gerar_docx_certidao_internal(tipo, numero, data, consultor, motivo, chamado=
             
             corpo3 = doc.add_paragraph(); corpo3.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             corpo3.add_run("Diante da indisponibilidade específica, não havendo um prazo para solução do problema, a Primeira Vice-Presidência recomenda o ingresso dos autos físicos, nos termos do § 2º, do artigo 14º, da Resolução nº 780/2014, do Tribunal de Justiça do Estado de Minas Gerais.")
-            
             doc.add_paragraph("Colocamo-nos à disposição para outras informações que se fizerem necessárias.")
 
         doc.add_paragraph("\nRespeitosamente,")
@@ -348,7 +349,6 @@ def send_chat_notification_internal(consultor, status):
 def send_state_dump_webhook(state_data):
     if not WEBHOOK_STATE_DUMP: return False
     try:
-        # Usa a mesma função de limpeza para o webhook
         sanitized_data = clean_data_for_db(state_data)
         headers = {'Content-Type': 'application/json'}
         requests.post(WEBHOOK_STATE_DUMP, data=json.dumps(sanitized_data), headers=headers, timeout=5)
@@ -412,10 +412,9 @@ def save_state():
             'simon_ranking': st.session_state.get('simon_ranking', []),
             'previous_states': st.session_state.get('previous_states', {})
         }
-        # Limpeza é feita dentro de save_state_to_db agora, mas podemos chamar aqui também para garantir
         save_state_to_db(state_to_save)
         
-        # --- ALTERAÇÃO PRINCIPAL: INVALIDAÇÃO DE CACHE ---
+        # Limpa o cache de leitura para forçar atualização imediata para todos
         load_state_from_db.clear()
         
     except Exception as e: print(f"Erro save: {e}")
@@ -427,15 +426,14 @@ def format_time_duration(duration):
 
 def sync_state_from_db():
     try:
-        # Usa a função cacheada
+        # Usa a função com cache curto
         db_data = load_state_from_db()
         if not db_data: return
         keys = ['status_texto', 'bastao_queue', 'skip_flags', 'bastao_counts', 'priority_return_queue', 'daily_logs', 'simon_ranking', 'previous_states']
         for k in keys:
             if k in db_data: 
-                # --- OTIMIZAÇÃO: PAGINAÇÃO NA CARGA (RAM) ---
                 if k == 'daily_logs' and isinstance(db_data[k], list) and len(db_data[k]) > 150:
-                    st.session_state[k] = db_data[k][-150:] # Mantém apenas os 150 últimos na RAM
+                    st.session_state[k] = db_data[k][-150:] 
                 else:
                     st.session_state[k] = db_data[k]
                     
@@ -469,7 +467,6 @@ def log_status_change(consultor, old_status, new_status, duration):
         'duration': duration, 'ip': device_id_audit
     })
     
-    # --- OTIMIZAÇÃO: LIMITAR TAMANHO DO LOG LOCALMENTE ---
     if len(st.session_state.daily_logs) > 150:
         st.session_state.daily_logs = st.session_state.daily_logs[-150:]
         
@@ -618,7 +615,8 @@ def init_session_state():
         'bastao_queue': [], 'skip_flags': {}, 'current_status_starts': {nome: now for nome in CONSULTORES},
         'bastao_counts': {nome: 0 for nome in CONSULTORES}, 'priority_return_queue': [], 'daily_logs': [], 'simon_ranking': [],
         'word_buffer': None, 'aviso_duplicidade': False, 'previous_states': {}, 'view_logmein_ui': False,
-        'last_cleanup': time.time() # Default para limpeza
+        'last_cleanup': time.time(),
+        'last_hard_cleanup': time.time()
     }
     for key, default in defaults.items():
         if key not in st.session_state: st.session_state[key] = default
@@ -878,7 +876,7 @@ with c_topo_dir:
 
 st.markdown("<hr style='border: 1px solid #FF8C00; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
-if st.session_state.active_view is None: st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db() # <--- MANTIDO EM 20s
+if st.session_state.active_view is None: st_autorefresh(interval=20000, key='auto_rerun'); sync_state_from_db() # <--- VOLTADO PARA 20s
 else: st.caption("⏸️ Atualização automática pausada durante o registro.")
 
 col_principal, col_disponibilidade = st.columns([1.5, 1])
