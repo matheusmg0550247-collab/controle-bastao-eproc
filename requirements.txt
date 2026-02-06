@@ -1,9 +1,7 @@
-streamlit
+streamlit>=1.37.0
 pandas
 requests
-plotly
-streamlit-autorefresh
 supabase
-altair
 python-docx
-pytz
+altair
+streamlit-javascript
