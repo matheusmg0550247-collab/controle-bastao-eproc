@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import time
-import gc  # Importação para limpeza de memória
+import gc
 from datetime import datetime, timedelta, date
 from operator import itemgetter
 from streamlit_autorefresh import st_autorefresh
@@ -46,7 +46,7 @@ REG_DESFECHO_OPCOES = ["Resolvido - Cesupe", "Escalonado"]
 
 OPCOES_ATIVIDADES_STATUS = ["HP", "E-mail", "WhatsApp Plantão", "Homologação", "Redação Documentos", "Outros"]
 
-# URLs e Visuais (PADRÃO FEVEREIRO LARANJA / CARNAVAL)
+# URLs e Visuais
 GIF_BASTAO_HOLDER = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExa3Uwazd5cnNra2oxdDkydjZkcHdqcWN2cng0Y2N0cmNmN21vYXVzMiZlcD12MV9pbnRlcm5uYWxfZ2lmX2J5X2lkJmN0PWc/3rXs5J0hZkXwTZjuvM/giphy.gif"
 GIF_LOGMEIN_TARGET = "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjFvczlzd3ExMWc2cWJrZ3EwNmplM285OGFqOHE1MXlzdnd4cndibiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/mcsPU3SkKrYDdW3aAU/giphy.gif"
 BASTAO_EMOJI = "🎭" 
@@ -58,10 +58,10 @@ CHAT_WEBHOOK_BASTAO = get_secret("chat", "bastao")
 WEBHOOK_STATE_DUMP = get_secret("webhook", "test_state")
 
 # ============================================
-# 2. OTIMIZAÇÃO E CONEXÃO
+# 2. OTIMIZAÇÃO E CONEXÃO (BLINDADA)
 # ============================================
 
-# TTL DE 1 HORA NA CONEXÃO (Evita desconexão por inatividade)
+# Renovação de conexão a cada 1 hora (TTL 3600)
 @st.cache_resource(ttl=3600)
 def get_supabase():
     try: 
@@ -76,7 +76,6 @@ def carregar_dados_grafico():
     sb = get_supabase()
     if not sb: return None, None
     try:
-        # ID 1
         res = sb.table("atendimentos_resumo").select("data").eq("id", DB_APP_ID).execute()
         if res.data:
             json_data = res.data[0]['data']
@@ -96,7 +95,7 @@ def get_img_as_base64_cached(file_path):
     except: return None
 
 # ============================================
-# 3. REPOSITÓRIO (CACHE ULTRA-RÁPIDO)
+# 3. REPOSITÓRIO (CACHE MENTIROSO - 10s)
 # ============================================
 
 def clean_data_for_db(obj):
@@ -111,13 +110,13 @@ def clean_data_for_db(obj):
     else:
         return obj
 
-# CACHE DE LEITURA DE 2 SEGUNDOS (Permite refresh de 5s sem matar o banco)
-@st.cache_data(ttl=2, show_spinner=False)
+# TTL de 10 SEGUNDOS.
+# Isso garante que o banco descanse. O dado pode ficar "velho" por até 10s.
+@st.cache_data(ttl=10, show_spinner=False)
 def load_state_from_db():
     sb = get_supabase()
     if not sb: return {}
     try:
-        # ID 1
         response = sb.table("app_state").select("data").eq("id", DB_APP_ID).execute()
         if response.data and len(response.data) > 0:
             return response.data[0].get("data", {})
@@ -132,7 +131,6 @@ def save_state_to_db(state_data):
         return
     try:
         sanitized_data = clean_data_for_db(state_data)
-        # ID 1
         sb.table("app_state").upsert({"id": DB_APP_ID, "data": sanitized_data}).execute()
     except Exception as e:
         st.error(f"🔥 ERRO DE ESCRITA NO BANCO: {e}")
@@ -142,7 +140,6 @@ def get_logmein_status():
     sb = get_supabase()
     if not sb: return None, False
     try:
-        # ID LOGMEIN É SEMPRE 1 (COMPARTILHADO)
         res = sb.table("controle_logmein").select("*").eq("id", LOGMEIN_DB_ID).execute()
         if res.data:
             return res.data[0].get('consultor_atual'), res.data[0].get('em_uso', False)
@@ -162,7 +159,7 @@ def set_logmein_status(consultor, em_uso):
     except Exception as e: st.error(f"Erro LogMeIn DB: {e}")
 
 # ============================================
-# 4. FUNÇÕES DE UTILIDADE, IP E MEMÓRIA
+# 4. FUNÇÕES DE UTILIDADE E IP
 # ============================================
 def get_browser_id():
     if st_javascript is None: return "no_js_lib"
@@ -198,17 +195,15 @@ def memory_sweeper():
     if 'last_cleanup' not in st.session_state:
         st.session_state.last_cleanup = time.time()
         return
-    # Limpeza leve (5 min)
     if time.time() - st.session_state.last_cleanup > 300:
         st.session_state.word_buffer = None 
         gc.collect()
         st.session_state.last_cleanup = time.time()
         
-    # Limpeza PESADA (4 horas)
     if 'last_hard_cleanup' not in st.session_state:
         st.session_state.last_hard_cleanup = time.time()
         
-    if time.time() - st.session_state.last_hard_cleanup > 14400:
+    if time.time() - st.session_state.last_hard_cleanup > 14400: # 4h
         st.cache_data.clear()
         gc.collect()
         st.session_state.last_hard_cleanup = time.time()
@@ -408,9 +403,7 @@ def save_state():
             'previous_states': st.session_state.get('previous_states', {})
         }
         save_state_to_db(state_to_save)
-        
-        # --- INVALIDAÇÃO DE CACHE (CRÍTICO) ---
-        load_state_from_db.clear()
+        # REMOVIDO: load_state_from_db.clear() -> Isso evita o crash em massa.
         
     except Exception as e: print(f"Erro save: {e}")
 
@@ -421,13 +414,12 @@ def format_time_duration(duration):
 
 def sync_state_from_db():
     try:
-        # Usa a função cacheada
+        # Usa a função com cache
         db_data = load_state_from_db()
         if not db_data: return
         keys = ['status_texto', 'bastao_queue', 'skip_flags', 'bastao_counts', 'priority_return_queue', 'daily_logs', 'simon_ranking', 'previous_states']
         for k in keys:
             if k in db_data: 
-                # Paginação
                 if k == 'daily_logs' and isinstance(db_data[k], list) and len(db_data[k]) > 150:
                     st.session_state[k] = db_data[k][-150:] 
                 else:
@@ -872,8 +864,8 @@ with c_topo_dir:
 
 st.markdown("<hr style='border: 1px solid #FF8C00; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
-# ALTERAÇÃO: 5000 (5s) para refresh mais rápido
-if st.session_state.active_view is None: st_autorefresh(interval=5000, key='auto_rerun'); sync_state_from_db() 
+# REFRESH AUMENTADO PARA 15 SEGUNDOS (ESTABILIDADE)
+if st.session_state.active_view is None: st_autorefresh(interval=15000, key='auto_rerun'); sync_state_from_db() 
 else: st.caption("⏸️ Atualização automática pausada durante o registro.")
 
 col_principal, col_disponibilidade = st.columns([1.5, 1])
@@ -884,7 +876,17 @@ prox_idx = find_next_holder_index(curr_idx, queue, skips)
 proximo = queue[prox_idx] if prox_idx != -1 else None
 
 with col_principal:
-    st.header("Responsável pelo Bastão")
+    # === CABEÇALHO + BOTÃO DE ATUALIZAR (A VÁLVULA DE ESCAPE) ===
+    c_head, c_btn = st.columns([0.7, 0.3], vertical_alignment="bottom")
+    with c_head:
+        st.header("Responsável pelo Bastão")
+    with c_btn:
+        if st.button("🔄 Atualizar Agora", use_container_width=True):
+            # Este botão força a limpeza do cache APENAS para quem clicou,
+            # sem derrubar o sistema para os outros.
+            load_state_from_db.clear()
+            st.rerun()
+            
     if responsavel:
         # Visual atualizado para Laranja
         st.markdown(f"""<div style="background: linear-gradient(135deg, #FFF3E0 0%, #FFFFFF 100%); border: 3px solid #FF8C00; padding: 25px; border-radius: 15px; display: flex; align-items: center; box-shadow: 0 4px 15px rgba(255, 140, 0, 0.3); margin-bottom: 20px;"><div style="flex-shrink: 0; margin-right: 25px;"><img src="{GIF_BASTAO_HOLDER}" style="width: 90px; height: 90px; border-radius: 50%; object-fit: cover; border: 2px solid #FF8C00;"></div><div><span style="font-size: 14px; color: #555; font-weight: bold; text-transform: uppercase; letter-spacing: 1.5px;">Atualmente com:</span><br><span style="font-size: 42px; font-weight: 800; color: #FF4500; line-height: 1.1;">{responsavel}</span></div></div>""", unsafe_allow_html=True)
