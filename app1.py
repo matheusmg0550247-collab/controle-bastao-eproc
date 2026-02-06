@@ -6,7 +6,7 @@ import time
 import gc
 from datetime import datetime, timedelta, date
 from operator import itemgetter
-# st_autorefresh removido pois usaremos Fragments nativos
+# st_autorefresh removido pois substituído por st.fragment nativo
 import json
 import re
 import base64
@@ -112,7 +112,9 @@ def clean_data_for_db(obj):
     else:
         return obj
 
-# OTIMIZAÇÃO: Cache de 2 segundos para suportar refresh de 10s sem travar o banco
+# OTIMIZAÇÃO: Cache de 2 segundos. O fragmento roda a cada 15s, mas se alguém clicar
+# no botão "Atualizar Agora", ele busca no cache recente para não derrubar o banco.
+# Se houver escrita, o cache é limpo.
 @st.cache_data(ttl=2, show_spinner=False)
 def load_state_from_db():
     sb = get_supabase()
@@ -124,7 +126,6 @@ def load_state_from_db():
             return response.data[0].get("data", {})
         return {}
     except Exception as e:
-        # Não exibe erro na tela para não assustar, apenas retorna vazio e tenta de novo
         return {}
 
 def save_state_to_db(state_data):
@@ -228,7 +229,7 @@ def get_ordered_visual_queue(queue, status_dict):
     except ValueError: return list(queue)
 
 # ============================================
-# 5. LÓGICA DE BANCO / CERTIDÃO / LOGS (ATUALIZADO)
+# 5. LÓGICA DE BANCO / CERTIDÃO / LOGS (COMPLETA)
 # ============================================
 
 def verificar_duplicidade_certidao(tipo, processo=None, data=None):
@@ -427,6 +428,12 @@ def save_state():
         }
         # Limpeza é feita dentro de save_state_to_db agora, mas podemos chamar aqui também para garantir
         save_state_to_db(state_to_save)
+        
+        # --- INVALIDAÇÃO DE CACHE (CRÍTICO) ---
+        # Como o refresh é 15s, limpamos o cache quando alguém salva para que,
+        # se alguém clicar em "Atualizar Agora", veja o dado novo.
+        load_state_from_db.clear()
+        
     except Exception as e: print(f"Erro save: {e}")
 
 def format_time_duration(duration):
@@ -436,17 +443,18 @@ def format_time_duration(duration):
 
 def sync_state_from_db():
     try:
+        # Usa a função cacheada (2s)
         db_data = load_state_from_db()
         if not db_data: return
         keys = ['status_texto', 'bastao_queue', 'skip_flags', 'bastao_counts', 'priority_return_queue', 'daily_logs', 'simon_ranking', 'previous_states']
         for k in keys:
             if k in db_data: 
-                # Paginação de logs
+                # Paginação
                 if k == 'daily_logs' and isinstance(db_data[k], list) and len(db_data[k]) > 150:
                     st.session_state[k] = db_data[k][-150:] 
                 else:
                     st.session_state[k] = db_data[k]
-        
+                    
         if 'bastao_start_time' in db_data and db_data['bastao_start_time']:
             try:
                 if isinstance(db_data['bastao_start_time'], str): st.session_state['bastao_start_time'] = datetime.fromisoformat(db_data['bastao_start_time'])
@@ -553,7 +561,7 @@ def auto_manage_time():
     now = get_brazil_time()
     last_run = st.session_state.report_last_run_date
     
-    # Correção de tipo se necessário
+    # Proteção de tipo
     if isinstance(last_run, str):
         try: last_run_dt = datetime.fromisoformat(last_run)
         except: last_run_dt = datetime.min
@@ -620,7 +628,7 @@ def init_session_state():
         try:
             db_data = load_state_from_db()
             if db_data:
-                # CORREÇÃO DO ERRO DE DATA AQUI
+                # CORREÇÃO CRÍTICA DE DATA
                 if 'report_last_run_date' in db_data and isinstance(db_data['report_last_run_date'], str):
                     try:
                         db_data['report_last_run_date'] = datetime.fromisoformat(db_data['report_last_run_date'])
@@ -676,7 +684,6 @@ def reset_day_state():
 
 def ensure_daily_reset():
     now_br = get_brazil_time(); last_run = st.session_state.report_last_run_date
-    # Garante que é data
     last_run_date = last_run.date() if isinstance(last_run, datetime) else date.min
     
     if now_br.date() > last_run_date:
@@ -890,35 +897,34 @@ st.components.v1.html("<script>window.scrollTo(0, 0);</script>", height=0)
 # Texto de conscientização - Fevereiro Laranja
 st.info("🎗️ Fevereiro Laranja é um convite à consciência e à ação: ele chama atenção para a leucemia e para a importância do diagnóstico precoce, que pode salvar vidas. 💛🧡 Informar, apoiar quem está em tratamento e incentivar a doação de sangue e de medula óssea são atitudes que fazem diferença. Compartilhe, converse e, se puder, cadastre-se como doador — um gesto simples pode ser a esperança de alguém.")
 
-# --- FRAGMENTO DO PAINEL PRINCIPAL (ATUALIZAÇÃO SUAVE) ---
-@st.fragment(run_every=10)
-def painel_principal():
+# =========================================================================
+# FRAGMENTO VISUAL AUTOMÁTICO (ATUALIZAÇÃO DE ESTADO A CADA 15s)
+# =========================================================================
+@st.fragment(run_every=15)
+def painel_visual_automatico():
+    # 1. Sincroniza estado do banco (com cache 2s para não sobrecarregar)
     sync_state_from_db()
+
+    # 2. Dados locais pós-sync
+    queue = st.session_state.bastao_queue
+    skips = st.session_state.skip_flags
+    responsavel = next((c for c, s in st.session_state.status_texto.items() if 'Bastão' in s), None)
     
+    # 3. Header e Imagem
     c_topo_esq, c_topo_dir = st.columns([2, 1], vertical_alignment="bottom")
     with c_topo_esq:
         img = get_img_as_base64_cached(PUG2026_FILENAME); src = f"data:image/png;base64,{img}" if img else GIF_BASTAO_HOLDER
         st.markdown(f"""<div style="display: flex; align-items: center; gap: 15px;"><h1 style="margin: 0; padding: 0; font-size: 2.2rem; color: #FF8C00; text-shadow: 1px 1px 2px #FF4500;">Controle Bastão Cesupe 2026 {BASTAO_EMOJI}</h1><img src="{src}" style="width: 150px; height: 150px; border-radius: 10px; border: 4px solid #FF8C00; object-fit: cover;"></div>""", unsafe_allow_html=True)
     with c_topo_dir:
-        c_sub1, c_sub2 = st.columns([2, 1], vertical_alignment="bottom")
-        with c_sub1: 
-            # Dropdown dentro do fragmento
-            novo_responsavel = st.selectbox("Assumir Bastão (Rápido)", options=["Selecione"] + CONSULTORES, label_visibility="collapsed", key="quick_enter_frag")
-        with c_sub2:
-            if st.button("🚀 Entrar", use_container_width=True, key="btn_quick_entrar"):
-                if novo_responsavel != "Selecione": toggle_queue(novo_responsavel); st.rerun()
-        
-        dev_id_short = st.session_state.get('device_id_val', '???')[-4:] if 'device_id_val' in st.session_state else '...'
-        st.caption(f"ID: ...{dev_id_short}")
+        st.caption(f"ID: ...{st.session_state.get('device_id_val', '???')[-4:]}")
+        # Botão de Atualização Manual (Válvula de Escape)
+        if st.button("🔄 Atualizar Agora", use_container_width=True):
+             load_state_from_db.clear() # Limpa cache local
+             st.rerun()
 
     st.markdown("<hr style='border: 1px solid #FF8C00; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
 
     col_principal, col_disponibilidade = st.columns([1.5, 1])
-    queue, skips = st.session_state.bastao_queue, st.session_state.skip_flags
-    responsavel = next((c for c, s in st.session_state.status_texto.items() if 'Bastão' in s), None)
-    curr_idx = queue.index(responsavel) if responsavel in queue else -1
-    prox_idx = find_next_holder_index(curr_idx, queue, skips)
-    proximo = queue[prox_idx] if prox_idx != -1 else None
 
     with col_principal:
         st.header("Responsável pelo Bastão")
@@ -927,57 +933,9 @@ def painel_principal():
             dur = get_brazil_time() - (st.session_state.bastao_start_time or get_brazil_time())
             st.caption(f"⏱️ Tempo com o bastão: **{format_time_duration(dur)}**")
         else: st.markdown('<h2>(Ninguém com o bastão)</h2>', unsafe_allow_html=True)
-        st.markdown("###"); st.header("Próximos da Fila")
-        
-        if responsavel and responsavel in queue:
-            c_idx = queue.index(responsavel)
-            raw_ordered = queue[c_idx+1:] + queue[:c_idx]
-        else: raw_ordered = list(queue)
-
-        lista_pularam = [n for n in queue if skips.get(n, False) and n != responsavel]
-        demais_na_fila = [n for n in raw_ordered if n != proximo and not skips.get(n, False)]
-
-        if proximo: st.markdown(f"**Próximo Bastão:** {proximo}")
-        else: st.markdown("**Próximo Bastão:** _Ninguém elegível_")
-        if demais_na_fila: st.markdown(f"**Demais na fila:** {', '.join(demais_na_fila)}")
-        else: st.markdown("**Demais na fila:** _Vazio_")
-        if lista_pularam: st.markdown(f"**Consultor(es) pulou(pularam) o bastão:** {', '.join(lista_pularam)}")
-
-        st.markdown("###"); st.header("**Consultor(a)**")
-        
-        # --- GRID DE BOTÕES ---
-        c_nome, c_act1, c_act2, c_act3 = st.columns([2, 1, 1, 1], vertical_alignment="bottom")
-        with c_nome:
-            # Selectbox deve ter chave unica no fragmento
-            st.session_state.consultor_selectbox = st.selectbox('Selecione:', ['Selecione um nome'] + CONSULTORES, key='consultor_selectbox_frag', label_visibility='collapsed')
-        with c_act1:
-            if st.button("🎭 Entrar/Sair Fila", use_container_width=True, key="btn_toggle_queue"): toggle_presence_btn(); st.rerun()
-        with c_act2:
-            if st.button('🎯 Passar', use_container_width=True, key="btn_rotate"): rotate_bastao(); st.rerun()
-        with c_act3:
-            if st.button('⏭️ Pular', use_container_width=True, key="btn_skip"): toggle_skip(); st.rerun()
-        
-        r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5)
-        # Atenção: Botões que chamam toggle_view precisam estar fora do fragmento ou manipular estado global
-        # Como toggle_view muda o estado active_view, que é lido fora, precisamos dar rerun
-        if r2c1.button('📋 Atividades', use_container_width=True, key="btn_ativ"): toggle_view('menu_atividades'); st.rerun()
-        if r2c2.button('🏗️ Projeto', use_container_width=True, key="btn_proj"): toggle_view('menu_projetos'); st.rerun()
-        if r2c3.button('🎓 Treinamento', use_container_width=True, key="btn_trein"): toggle_view('menu_treinamento'); st.rerun()
-        if r2c4.button('📅 Reunião', use_container_width=True, key="btn_reun"): toggle_view('menu_reuniao'); st.rerun()
-        if r2c5.button('🍽️ Almoço', use_container_width=True, key="btn_almoco"): update_status('Almoço', True); st.rerun()
-        
-        r3c1, r3c2, r3c3, r3c4 = st.columns(4)
-        if r3c1.button('🎙️ Sessão', use_container_width=True, key="btn_sessao"): toggle_view('menu_sessao'); st.rerun()
-        if r3c2.button('🚶 Saída', use_container_width=True, key="btn_saida"): update_status('Saída rápida', True); st.rerun()
-        if r3c3.button('🏃 Sair', use_container_width=True, key="btn_sair_geral"): update_status('Indisponível', True); st.rerun()
-        if r3c4.button("🤝 Atend. Presencial", use_container_width=True, key="btn_presencial"): toggle_view('menu_presencial'); st.rerun()
-
-        # LogMeIn no Fragmento
-        st.markdown("####")
-        if st.button('🔑 LogMeIn', use_container_width=True, key="btn_logmein"):
-            open_logmein_ui(); st.rerun()
 
     with col_disponibilidade:
+        # Coluna da Direita (Status e Filas)
         st.header('Status dos(as) Consultores(as)')
         ui_lists = {'fila': [], 'almoco': [], 'saida': [], 'ausente': [], 'atividade_especifica': [], 'sessao_especifica': [], 'projeto_especifico': [], 'reuniao_especifica': [], 'treinamento_especifico': [], 'indisponivel': [], 'presencial_especifico': []}
         for nome in CONSULTORES:
@@ -1003,7 +961,8 @@ def painel_principal():
             for i, nome in enumerate(render_order):
                 if nome not in ui_lists['fila']: continue
                 col_nome, col_check = st.columns([0.85, 0.15], vertical_alignment='center')
-                col_check.checkbox(' ', key=f'chk_fila_{nome}_frag', value=True, disabled=True, label_visibility='collapsed')
+                # Checkbox apenas visual aqui (dentro do fragmento)
+                col_check.checkbox(' ', key=f'chk_fila_{nome}_visual', value=True, disabled=True, label_visibility='collapsed')
                 skip_flag = skips.get(nome, False); status_atual = st.session_state.status_texto.get(nome, '') or ''; extra = ''
                 if 'Atividade' in status_atual: extra += ' 📋'
                 if 'Projeto' in status_atual: extra += ' 🏗️'
@@ -1022,8 +981,9 @@ def painel_principal():
                     nome = item[0] if isinstance(item, tuple) else item
                     desc = item[1] if isinstance(item, tuple) else titulo
                     col_n, col_c = st.columns([0.85, 0.15], vertical_alignment='center')
+                    # Botão para sair de indisponibilidade deve ser externo para funcionar
                     if titulo == 'Indisponível': 
-                        col_c.checkbox(' ', key=f'chk_{titulo}_{nome}_frag', value=False, on_change=enter_from_indisponivel, args=(nome,), label_visibility='collapsed')
+                         col_c.write("🔒") # Visual apenas no fragmento
                     col_n.markdown(f"<div style='font-size: 16px; margin: 2px 0;'><strong>{nome}</strong><span style='background-color: {bg_hex}; color: #333; padding: 2px 8px; border-radius: 12px; font-size: 14px; margin-left: 8px;'>{desc}</span></div>", unsafe_allow_html=True)
             st.markdown('---')
             
@@ -1037,46 +997,46 @@ def painel_principal():
         _render_section('Saída rápida', '🚶', ui_lists['saida'], 'red', 'Saída rápida')
         _render_section('Indisponível', '❌', ui_lists['indisponivel'], 'grey', '')
 
-# EXECUTA O FRAGMENTO
-painel_principal()
 
-# ============================================
-# LÓGICA DE MENUS (FORA DO FRAGMENTO PARA NÃO RECARREGAR O PAINEL INTEIRO)
-# ============================================
+# === CHAMA O FRAGMENTO DE VISUALIZAÇÃO ===
+# Se houver um menu ativo, não renderiza o fragmento automático para evitar conflitos visuais
+if st.session_state.active_view is None:
+    painel_visual_automatico()
 
-if st.session_state.view_logmein_ui:
-    with st.container(border=True):
-        st.markdown("### 💻 Acesso LogMeIn")
-        l_user, l_in_use = get_logmein_status()
-        
-        st.image(GIF_LOGMEIN_TARGET, width=180)
-        
-        if l_in_use:
-            st.error(f"🔴 EM USO POR: **{l_user}**")
-            meu_nome = st.session_state.get('consultor_selectbox')
-            if meu_nome == l_user or meu_nome in CONSULTORES:
-                if st.button("🔓 LIBERAR AGORA", type="primary", use_container_width=True):
-                    set_logmein_status(None, False)
-                    close_logmein_ui()
-                    st.rerun()
-            else:
-                st.info("Aguarde a liberação.")
-        else:
-            st.success("✅ LIVRE PARA USO")
-            meu_nome = st.session_state.get('consultor_selectbox')
-            if meu_nome and meu_nome != "Selecione um nome":
-                if st.button("🚀 ASSUMIR AGORA", use_container_width=True):
-                    set_logmein_status(meu_nome, True)
-                    close_logmein_ui()
-                    st.rerun()
-            else:
-                st.warning("Selecione seu nome no topo para assumir.")
-        
-        if st.button("Fechar", use_container_width=True):
-            close_logmein_ui()
-            st.rerun()
+# =========================================================================
+# PAINEL DE AÇÃO (INTERATIVO - FORA DO FRAGMENTO)
+# =========================================================================
+# Se houver menu ativo, esconde os botões de ação principais
+if st.session_state.active_view is None:
+    st.markdown("### 🎮 Painel de Ação")
+    c_nome, c_act1, c_act2, c_act3 = st.columns([2, 1, 1, 1], vertical_alignment="bottom")
+    with c_nome:
+        st.selectbox('Selecione seu nome:', ['Selecione um nome'] + CONSULTORES, key='consultor_selectbox', label_visibility='collapsed')
+    with c_act1:
+        st.button("🎭 Entrar/Sair Fila", on_click=toggle_presence_btn, use_container_width=True)
+    with c_act2:
+        st.button('🎯 Passar', on_click=rotate_bastao, use_container_width=True)
+    with c_act3:
+        st.button('⏭️ Pular', on_click=toggle_skip, use_container_width=True)
+    
+    r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5)
+    r2c1.button('📋 Atividades', on_click=toggle_view, args=('menu_atividades',), use_container_width=True)
+    r2c2.button('🏗️ Projeto', on_click=toggle_view, args=('menu_projetos',), use_container_width=True)
+    r2c3.button('🎓 Treinamento', on_click=toggle_view, args=('menu_treinamento',), use_container_width=True)
+    r2c4.button('📅 Reunião', on_click=toggle_view, args=('menu_reuniao',), use_container_width=True)
+    r2c5.button('🍽️ Almoço', on_click=update_status, args=('Almoço', True), use_container_width=True)
+    
+    r3c1, r3c2, r3c3, r3c4 = st.columns(4)
+    r3c1.button('🎙️ Sessão', on_click=toggle_view, args=('menu_sessao',), use_container_width=True)
+    r3c2.button('🚶 Saída', on_click=update_status, args=('Saída rápida', True), use_container_width=True)
+    r3c3.button('🏃 Sair', on_click=update_status, args=('Indisponível', True), use_container_width=True)
+    if r3c4.button("🤝 Atend. Presencial", use_container_width=True): toggle_view('menu_presencial')
+    
+    st.markdown("####")
+    if st.button('🔑 LogMeIn', use_container_width=True):
+        open_logmein_ui()
 
-# --- MENUS DE AÇÃO ---
+# --- MENUS DE AÇÃO (RENDERIZADOS NORMALMENTE) ---
 if st.session_state.active_view == 'menu_atividades':
     with st.container(border=True):
         at_t = st.multiselect("Tipo:", OPCOES_ATIVIDADES_STATUS); at_e = st.text_input("Detalhe:")
@@ -1159,15 +1119,54 @@ if st.session_state.active_view == 'menu_sessao':
         with c_cancel:
             if st.button('❌ Cancelar', use_container_width=True): st.session_state.active_view = None; st.rerun()
 
+# === LOGMEIN UI ===
+if st.session_state.view_logmein_ui:
+    with st.container(border=True):
+        st.markdown("### 💻 Acesso LogMeIn")
+        l_user, l_in_use = get_logmein_status()
+        
+        # Mostra o GIF COM TAMANHO REDUZIDO (180px)
+        st.image(GIF_LOGMEIN_TARGET, width=180)
+        
+        if l_in_use:
+            st.error(f"🔴 EM USO POR: **{l_user}**")
+            meu_nome = st.session_state.get('consultor_selectbox')
+            # Libera se for o dono ou admin
+            if meu_nome == l_user or meu_nome in CONSULTORES:
+                if st.button("🔓 LIBERAR AGORA", type="primary", use_container_width=True):
+                    set_logmein_status(None, False)
+                    close_logmein_ui()
+                    st.rerun()
+            else:
+                st.info("Aguarde a liberação.")
+        else:
+            st.success("✅ LIVRE PARA USO")
+            meu_nome = st.session_state.get('consultor_selectbox')
+            if meu_nome and meu_nome != "Selecione um nome":
+                if st.button("🚀 ASSUMIR AGORA", use_container_width=True):
+                    set_logmein_status(meu_nome, True)
+                    close_logmein_ui()
+                    st.rerun()
+            else:
+                st.warning("Selecione seu nome no topo para assumir.")
+        
+        if st.button("Fechar", use_container_width=True):
+            close_logmein_ui()
+            st.rerun()
+
+st.markdown("<hr style='border: 1px solid #FF8C00; margin-top: 5px; margin-bottom: 20px;'>", unsafe_allow_html=True)
+
 # --- FERRAMENTAS ---
-c_tool1, c_tool2, c_tool3, c_tool4, c_tool5, c_tool6, c_tool7 = st.columns(7)
-c_tool1.button("📑 Checklist", use_container_width=True, on_click=toggle_view, args=("checklist",))
-c_tool2.button("🆘 Chamados", use_container_width=True, on_click=toggle_view, args=("chamados",))
-c_tool3.button("📝 Atendimentos", use_container_width=True, on_click=toggle_view, args=("atendimentos",))
-c_tool4.button("⏰ H. Extras", use_container_width=True, on_click=toggle_view, args=("hextras",))
-c_tool5.button("🐛 Erro/Novidade", use_container_width=True, on_click=toggle_view, args=("erro_novidade",))
-c_tool6.button("🖨️ Certidão", use_container_width=True, on_click=toggle_view, args=("certidao",))
-c_tool7.button("💡 Sugestão", use_container_width=True, on_click=toggle_view, args=("sugestao",))
+# Só mostra se nenhum menu ativo
+if st.session_state.active_view is None:
+    c_tool1, c_tool2, c_tool3, c_tool4, c_tool5, c_tool6, c_tool7 = st.columns(7)
+    c_tool1.button("📑 Checklist", use_container_width=True, on_click=toggle_view, args=("checklist",))
+    c_tool2.button("🆘 Chamados", use_container_width=True, on_click=toggle_view, args=("chamados",))
+    c_tool3.button("📝 Atendimentos", use_container_width=True, on_click=toggle_view, args=("atendimentos",))
+    c_tool4.button("⏰ H. Extras", use_container_width=True, on_click=toggle_view, args=("hextras",))
+    c_tool5.button("🐛 Erro/Novidade", use_container_width=True, on_click=toggle_view, args=("erro_novidade",))
+    c_tool6.button("🖨️ Certidão", use_container_width=True, on_click=toggle_view, args=("certidao",))
+    c_tool7.button("💡 Sugestão", use_container_width=True, on_click=toggle_view, args=("sugestao",))
 
 if st.session_state.active_view == "checklist":
     with st.container(border=True):
